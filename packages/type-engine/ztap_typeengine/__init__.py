@@ -18,6 +18,7 @@ from .conflict import (
     Row,
     resolve,
 )
+from .uc import uc_column
 
 __all__ = [
     "LogicalType",
@@ -29,6 +30,7 @@ __all__ = [
     "ConflictResolution",
     "Row",
     "resolve",
+    "uc_column",
 ]
 
 __version__ = "0.1.0"

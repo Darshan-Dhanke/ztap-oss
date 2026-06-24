@@ -53,17 +53,34 @@ holds the table's schema/metadata; the Parquet/Delta files are not yet written.
 | # | Component | Status | Where |
 |---|-----------|--------|-------|
 | 1 | Suspend/resume-aware connection proxy | **design only** | — |
-| 2 | Bidirectional sync state machine (schema evolution) | **next** | — |
+| 2 | Bidirectional sync state machine (schema evolution) | **built + tested** | `services/sync` |
 | 3 | Control-plane API (the "project" abstraction) | **built + tested** | `services/control-plane` |
 | 4 | Type mapping + conflict-resolution engine | **built + tested** | `packages/type-engine` |
 | + | Delta sink (CDC → Delta tables in MinIO) | **built + tested** | `services/sink` |
 
-Components #3 and #4 were the ones buildable and verifiable end-to-end in a
-single pass, so they came first. #4 is the silent-corruption risk; #3 is the
-developer-experience surface. The **Delta sink** (Phase 2) closes the data loop
-so Unity Catalog's registered tables actually have Delta files behind them. #1
-(systems-programming heavy, coupled to a Neon-style cplane/auth) and #2 (the
-bidirectional sync state machine, the hardest) remain ahead.
+Components #3 and #4 came first (buildable + verifiable in one pass); #4 is the
+silent-corruption risk, #3 the developer-experience surface. The **Delta sink**
+closed the data loop so Unity Catalog's tables have Delta files behind them.
+**#2, the sync state machine,** is now built: it reconciles PG↔UC schema drift
+and applies lakehouse→Postgres changes through the #4 conflict engine, with an
+idempotency ledger for loop-prevention. Only **#1** (systems-programming heavy,
+coupled to a Neon-style cplane/auth) remains a design stub.
+
+### Component #2 — the sync state machine (`services/sync`)
+
+Two responsibilities, both with a pure, unit-tested core and a thin I/O layer:
+
+- **Schema evolution (PG → catalog).** `POST /…/reconcile-schema` introspects
+  the live Postgres table, diffs it against the UC registration *through the
+  type-engine*, and — if a column was added/removed/retyped — re-registers the
+  UC EXTERNAL table to match (safe: the data lives in Delta/MinIO; the sink's
+  `schema_mode=merge` already evolved the files).
+- **Reverse sync (lakehouse → PG).** `POST /…/reverse-sync` applies
+  lakehouse-originated rows into Postgres. Each row is run through
+  `decide_reverse_apply`: an **idempotency ledger** (`ztap_control.sync_applied`)
+  drops changes already applied — this is the loop-prevention that stops a
+  reverse write from echoing back via CDC — and genuine conflicts are resolved
+  by the **#4 conflict engine** (last-write-wins / source-of-truth / merge).
 
 ## What this is NOT
 
@@ -82,5 +99,6 @@ bidirectional sync state machine, the hardest) remain ahead.
 | Unity Catalog | 18080 | 8080 |
 | Kafka (external) | 19092 | 9092 |
 | Delta sink | (no port; background consumer) | — |
+| Sync service | 18001 | 8000 |
 | Kafka Connect / Debezium | 18083 | 8083 |
 | Control plane API | 18000 | 8000 |

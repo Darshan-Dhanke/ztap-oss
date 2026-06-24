@@ -199,3 +199,31 @@ services:
       WAREHOUSE_BUCKET: ${WAREHOUSE_BUCKET:-warehouse}
       SINK_BATCH_MAX_SECONDS: "3"
     restart: unless-stopped
+
+  # --- custom component #2: bidirectional sync state machine ---
+  sync:
+    build:
+      context: .
+      dockerfile: services/sync/Dockerfile
+    container_name: ztap-sync
+    networks: [ztap]
+    ports:
+      - "18001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      unity-catalog:
+        condition: service_started
+    environment:
+      PG_HOST: postgres
+      PG_PORT: "5432"
+      PG_USER: ${POSTGRES_USER:-ztap}
+      PG_PASSWORD: ${POSTGRES_PASSWORD:-ztap}
+      PG_DB: ${POSTGRES_DB:-ztap}
+      UC_URL: http://unity-catalog:8080
+      WAREHOUSE_BUCKET: ${WAREHOUSE_BUCKET:-warehouse}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20

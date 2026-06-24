@@ -422,6 +422,16 @@ class Provisioner:
         try:
             with psycopg.connect(self._pg_dsn(), autocommit=True) as conn:
                 conn.execute("DELETE FROM ztap_control.projects WHERE name = %s", (name,))
+                # Clear the reverse-sync idempotency ledger for this project so a
+                # recreated project starts clean. The table is created lazily by
+                # the sync service, so guard for its existence first.
+                ledger = conn.execute(
+                    "SELECT to_regclass('ztap_control.sync_applied')"
+                ).fetchone()[0]
+                if ledger:
+                    conn.execute(
+                        "DELETE FROM ztap_control.sync_applied WHERE project = %s", (name,)
+                    )
         except Exception as e:  # noqa: BLE001
             errors.append(f"registry: {e}")
 

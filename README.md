@@ -32,10 +32,14 @@ two custom "connective tissue" components that are fully testable.
   and writes **real Delta Lake tables into MinIO** (via delta-rs, no Spark) at
   the exact `storage_location` Unity Catalog registered — closing the loop so a
   Postgres row ends up queryable as Delta. Captures insert/update/delete.
+- **Custom #2 — sync state machine** (`services/sync`): reconciles Postgres↔Unity
+  Catalog schema drift (`ALTER TABLE ADD COLUMN` → catalog updated), and applies
+  lakehouse→Postgres changes through the #4 conflict engine with an idempotency
+  ledger for loop-prevention.
 
-Deliberately **not** built yet (documented as design stubs in
+Deliberately **not** built yet (documented as a design stub in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)): the suspend/resume-aware
-connection proxy (#1) and the bidirectional sync state machine (#2).
+connection proxy (#1).
 
 ## Quick start
 
@@ -55,6 +59,7 @@ make smoke
 
 Then open:
 - Control plane API docs — http://localhost:18000/docs
+- Sync service API docs — http://localhost:18001/docs
 - Unity Catalog — http://localhost:18080
 - MinIO console — http://localhost:19001 (minioadmin / minioadmin)
 - Kafka Connect — http://localhost:18083/connectors
@@ -95,10 +100,12 @@ reason. That's the silent-corruption surface made visible at registration time.
 docker-compose.yml          OSS data plane (offset ports, own network)
 services/control-plane/     custom #3 — FastAPI control plane + tests
 services/sink/              custom Delta sink — Kafka CDC -> Delta on MinIO + tests
+services/sync/             custom #2 — schema reconcile + reverse sync + tests
 packages/type-engine/       custom #4 — type mapping + conflict engine + tests
 scripts/smoke_test.sh       end-to-end CDC smoke test
 scripts/edge_tests.sh       edge-case integration tests (nasty types, UC, teardown)
 scripts/sink_test.sh        Delta sink integration test (insert/update/delete -> Delta)
+scripts/sync_test.sh        #2 integration test (schema evolution + reverse sync)
 docs/                       ARCHITECTURE.md, LICENSES.md
 ```
 
