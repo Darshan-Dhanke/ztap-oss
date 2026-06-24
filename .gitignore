@@ -1,0 +1,49 @@
+# --- Secrets / config (most important) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials/
+
+# --- Local data volumes (the "oops, 5GB of parquet" trap) ---
+# anything mounted into containers for state
+data/
+pgdata/
+neond_data/
+.neon/
+warehouse/
+metastore/
+minio/
+kafka-data/
+*.log
+
+# --- Python (control plane / sync service) ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Rust (proxy) ---
+/target/
+**/target/
+
+# --- Go (if you go that route instead) ---
+/bin/
+
+# --- Terraform (control-plane provisioning) ---
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+*.swp

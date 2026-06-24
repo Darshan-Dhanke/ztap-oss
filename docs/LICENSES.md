@@ -1,0 +1,32 @@
+# Bundled component licenses
+
+ztap-oss does not redistribute any of the systems below — it pulls their stock
+container images at runtime via Docker Compose. **Each remains under its own
+license.** Consult the upstream project before you use it. This file is a
+convenience pointer, not legal advice.
+
+| Component | Image | License | Notes |
+|-----------|-------|---------|-------|
+| PostgreSQL | `postgres:16` | PostgreSQL License (permissive) | the "compute" |
+| MinIO | `minio/minio` | AGPL-3.0 | run as a stock service; do not fork/embed |
+| Unity Catalog | `unitycatalog/unitycatalog` | Apache-2.0 | catalog/governance foundation only |
+| Apache Kafka | `apache/kafka` | Apache-2.0 | event backbone (KRaft mode) |
+| Debezium | `debezium/connect` | Apache-2.0 | WAL CDC |
+
+## Things to actually watch
+
+- **MinIO is AGPL-3.0.** Running the stock image as a service you publish a
+  compose file for is fine ("mere aggregation"). The copyleft obligation
+  triggers if you *modify and distribute* MinIO itself. (An earlier draft of
+  this project considered S3/object stores generically; the AGPL note applies
+  to MinIO specifically.)
+- **Grafana (AGPL) / Airbyte (Elastic License 2.0)** are *not yet wired in* —
+  they belong to Phase 2 (observability) and reverse-sync respectively. When
+  added, the same rule applies: stock images, never offered as-a-service.
+- The restrictions in AGPL / ELv2 are about **offering the thing as a managed
+  service to third parties**. This project is explicitly not that.
+
+## ztap's own code
+
+Everything original here — the type-engine, the control-plane API, the smoke
+tests — is Apache-2.0 (see top-level `LICENSE`).

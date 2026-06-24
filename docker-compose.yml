@@ -1,0 +1,180 @@
+# ztap-oss local data plane.
+#
+# All ports are deliberately offset (1xxxx / 5xxxx) so this stack does NOT
+# collide with a typical Postgres/Kafka/MinIO dev setup already running on the
+# standard ports. Everything lives on its own `ztap` network.
+#
+# Each image below ships under its own upstream license — see docs/LICENSES.md.
+
+name: ztap-oss
+
+networks:
+  ztap:
+    driver: bridge
+
+volumes:
+  pgdata:
+  miniodata:
+  ucdata:
+
+services:
+  # --- "compute": Postgres with logical replication enabled (CDC source) ---
+  postgres:
+    image: postgres:16
+    container_name: ztap-postgres
+    networks: [ztap]
+    ports:
+      - "55432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ztap}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ztap}
+      POSTGRES_DB: ${POSTGRES_DB:-ztap}
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+      - "-c"
+      - "max_wal_senders=10"
+      - "-c"
+      - "max_replication_slots=10"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ztap} -d ${POSTGRES_DB:-ztap}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # --- lakehouse object store ---
+  minio:
+    image: minio/minio:latest
+    container_name: ztap-minio
+    networks: [ztap]
+    ports:
+      - "19000:9000"
+      - "19001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: server /data --console-address ":9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # create the warehouse bucket on startup, then exit
+  minio-init:
+    image: minio/mc:latest
+    container_name: ztap-minio-init
+    networks: [ztap]
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin} &&
+      mc mb --ignore-existing local/${WAREHOUSE_BUCKET:-warehouse} &&
+      echo 'ztap: warehouse bucket ready';
+      "
+    restart: "no"
+
+  # --- catalog / governance (Unity Catalog OSS, Apache-2.0) ---
+  unity-catalog:
+    image: unitycatalog/unitycatalog:latest
+    container_name: ztap-unity-catalog
+    networks: [ztap]
+    ports:
+      - "18080:8080"
+    volumes:
+      - ucdata:/home/unitycatalog/etc/data
+    healthcheck:
+      # The UC image has no curl; use bash's /dev/tcp to confirm the port is up.
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/localhost/8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # --- event backbone (Kafka in KRaft mode, no ZooKeeper) ---
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: ztap-kafka
+    networks: [ztap]
+    ports:
+      - "19092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:19092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+
+  # --- WAL CDC: Kafka Connect + Debezium Postgres connector ---
+  connect:
+    image: debezium/connect:2.7.3.Final
+    container_name: ztap-connect
+    networks: [ztap]
+    ports:
+      - "18083:8083"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: ztap-connect
+      CONFIG_STORAGE_TOPIC: ztap_connect_configs
+      OFFSET_STORAGE_TOPIC: ztap_connect_offsets
+      STATUS_STORAGE_TOPIC: ztap_connect_status
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8083/connectors || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # --- custom component #3: the control plane API ---
+  control-plane:
+    build:
+      context: .
+      dockerfile: services/control-plane/Dockerfile
+    container_name: ztap-control-plane
+    networks: [ztap]
+    ports:
+      - "18000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      connect:
+        condition: service_healthy
+      unity-catalog:
+        condition: service_started
+    environment:
+      PG_HOST: postgres
+      PG_PORT: "5432"
+      PG_USER: ${POSTGRES_USER:-ztap}
+      PG_PASSWORD: ${POSTGRES_PASSWORD:-ztap}
+      PG_DB: ${POSTGRES_DB:-ztap}
+      CONNECT_URL: http://connect:8083
+      UC_URL: http://unity-catalog:8080
+      KAFKA_BOOTSTRAP: kafka:9092
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
