@@ -64,9 +64,16 @@
     <h2>connection proxy (#1) — compute state</h2>
     <div class="grid" id="proxy-metrics"><div class="muted">loading…</div></div>
     <div class="row" style="margin-top:14px">
-      <button class="warn" onclick="suspendProxy()">Force compute suspend</button>
-      <span class="muted">Next connection through <code>:15432</code> triggers a cold-start wake.</span>
+      <button class="primary" onclick="wakeProxy()">Wake compute</button>
+      <button class="warn" onclick="suspendProxy()">Force suspend</button>
     </div>
+    <p class="muted" style="margin:12px 0 0">
+      <strong>“suspended” is normal, not an error.</strong> This is scale-to-zero:
+      after ~30s idle the (simulated) compute suspends. Nothing routes through the
+      proxy by default — the services talk to Postgres directly — so it sits idle.
+      A client connecting on <code>:15432</code> (or the Wake button) cold-starts it
+      back to <em>active</em>; each wake is counted above.
+    </p>
   </div>
 
   <div class="panel">
@@ -106,13 +113,15 @@ async function refresh(){
   }catch(e){ toast("refresh failed: "+e); }
 }
 
+const STATE_LABEL = {active:"active", waking:"waking…",
+  suspended:"suspended (idle)", unreachable:"unreachable"};
 function renderProxy(p){
   if(!p){p={state:"unreachable"};}
   const s = p.state||"unreachable";
   const m = $("#proxy-metrics");
   m.innerHTML = `
     <div class="metric"><div class="label">state</div>
-      <div class="value"><span class="dot ${s}"></span>${s}</div></div>
+      <div class="value"><span class="dot ${s}"></span>${STATE_LABEL[s]||s}</div></div>
     <div class="metric"><div class="label">cold-start wakes</div>
       <div class="value">${p.wake_count??"–"}</div></div>
     <div class="metric"><div class="label">active connections</div>
@@ -151,6 +160,12 @@ async function suspendProxy(){
   const r = await fetch("/api/proxy/suspend",{method:"POST"});
   if(r.ok){toast("compute suspended — next connection will cold-start");refresh();}
   else{toast("proxy unreachable");}
+}
+async function wakeProxy(){
+  toast("opening a connection through the proxy to wake compute…");
+  const r = await fetch("/api/proxy/wake",{method:"POST"});
+  if(r.ok){toast("compute is active (cold-start complete)");refresh();}
+  else{const e=await r.json().catch(()=>({}));toast("wake failed: "+(e.detail||r.status));}
 }
 
 refresh();

@@ -68,6 +68,30 @@ def proxy_suspend():
         raise HTTPException(status_code=502, detail=f"proxy unreachable: {e}") from e
 
 
+@app.post("/api/proxy/wake")
+def proxy_wake():
+    """Open a real Postgres connection *through* the proxy to trigger a cold-start
+    wake, then return the proxy's new state. This is what a client connecting on
+    :15432 would do — the dashboard button just does it for you."""
+    import psycopg
+
+    dsn = (
+        f"host={settings.proxy_pg_host} port={settings.proxy_pg_port} "
+        f"user={settings.pg_user} password={settings.pg_password} "
+        f"dbname={settings.pg_db} connect_timeout=10"
+    )
+    try:
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute("SELECT 1")
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"wake via proxy failed: {e}") from e
+    try:
+        with httpx.Client(timeout=3) as c:
+            return c.get(f"{settings.proxy_url}/state").json()
+    except Exception:  # noqa: BLE001
+        return {"state": "active"}
+
+
 @app.get("/config")
 def config():
     return {
