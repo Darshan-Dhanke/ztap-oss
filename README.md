@@ -61,7 +61,30 @@ make ps
 make smoke
 ```
 
+## Query the data
+
+The **Postgres** side (the "compute") with any client (pgAdmin, psql) at
+`localhost:55432` (db/user/pass `ztap`), or through the suspend/resume proxy at
+`localhost:15432`.
+
+The **lakehouse** side — the Delta tables the sink wrote to MinIO — with Trino:
+
+```bash
+# register a Delta table and query it (idempotent helper)
+scripts/query_delta.sh lake orders
+scripts/query_delta.sh lake orders "SELECT _op, count(*) FROM %T GROUP BY _op"
+
+# inspect the Delta transaction log (commit history)
+docker exec ztap-trino trino --catalog delta --schema lakehouse \
+  --execute 'SELECT version, operation, timestamp FROM "lake_orders$history"'
+```
+
+Or point any Trino-compatible SQL client (DBeaver, etc.) at `localhost:18090`.
+
+## Open the console
+
 Then open:
+- ztap console (dashboard) — http://localhost:18000/
 - Control plane API docs — http://localhost:18000/docs
 - Sync service API docs — http://localhost:18001/docs
 - Unity Catalog — http://localhost:18080

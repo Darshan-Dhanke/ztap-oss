@@ -180,6 +180,24 @@ services:
       timeout: 5s
       retries: 20
 
+  # --- analytical SQL over the Delta tables in MinIO (Trino + delta_lake) ---
+  trino:
+    image: ${TRINO_IMAGE:-trinodb/trino:450}
+    container_name: ztap-trino
+    networks: [ztap]
+    ports:
+      - "18090:8080"
+    depends_on:
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./services/trino/catalog/delta.properties:/etc/trino/catalog/delta.properties:ro
+    healthcheck:
+      test: ["CMD", "trino", "--execute", "SELECT 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+
   # --- custom component #1: suspend/resume-aware connection proxy ---
   proxy:
     build:

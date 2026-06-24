@@ -21,6 +21,7 @@ MAP=(
   "unitycatalog/unitycatalog:latest=ztap-unity-catalog"
   "apache/kafka:3.8.0=ztap-kafka"
   "debezium/connect:2.7.3.Final=ztap-debezium-connect"
+  "trinodb/trino:450=ztap-trino"
   # custom-built ztap services (built by docker compose)
   "ztap-oss-control-plane:latest=ztap-control-plane"
   "ztap-oss-sink:latest=ztap-sink"
@@ -58,3 +59,4 @@ echo "  MC_IMAGE=$NS/ztap-minio-mc:latest"
 echo "  UC_IMAGE=$NS/ztap-unity-catalog:latest"
 echo "  KAFKA_IMAGE=$NS/ztap-kafka:3.8.0"
 echo "  CONNECT_IMAGE=$NS/ztap-debezium-connect:2.7.3.Final"
+echo "  TRINO_IMAGE=$NS/ztap-trino:450"

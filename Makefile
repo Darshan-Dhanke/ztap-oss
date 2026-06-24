@@ -13,6 +13,7 @@ help:
 	@echo "  make sink-test - run the Delta sink integration test (CDC -> Delta in MinIO)"
 	@echo "  make sync-test - run the sync test (schema evolution + reverse sync)"
 	@echo "  make proxy-test- run the proxy test (cold-start wake through the proxy)"
+	@echo "  make query-delta - register + query the lake/orders Delta table via Trino"
 	@echo "  make test      - unit tests + bring up stack + all integration tests"
 
 up:
@@ -56,6 +57,9 @@ sync-test:
 
 proxy-test:
 	bash scripts/proxy_test.sh
+
+query-delta:
+	bash scripts/query_delta.sh
 
 test: test-unit test-go up
 	@echo "waiting for services to settle..."

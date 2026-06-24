@@ -116,5 +116,6 @@ Two responsibilities, both with a pure, unit-tested core and a thin I/O layer:
 | Sync service | 18001 | 8000 |
 | Proxy (Postgres wire) | 15432 | 5432 |
 | Proxy (state/control API) | 18002 | 8000 |
+| Trino (analytical SQL over Delta) | 18090 | 8080 |
 | Kafka Connect / Debezium | 18083 | 8083 |
 | Control plane API | 18000 | 8000 |

@@ -12,6 +12,7 @@ convenience pointer, not legal advice.
 | Unity Catalog | `unitycatalog/unitycatalog` | Apache-2.0 | catalog/governance foundation only |
 | Apache Kafka | `apache/kafka` | Apache-2.0 | event backbone (KRaft mode) |
 | Debezium | `debezium/connect` | Apache-2.0 | WAL CDC |
+| Trino | `trinodb/trino` | Apache-2.0 | analytical SQL over the Delta tables |
 
 ztap's own **sink service** is original Apache-2.0 code; the Python libraries it
 depends on are permissive: `deltalake`/delta-rs (Apache-2.0), `pyarrow`
