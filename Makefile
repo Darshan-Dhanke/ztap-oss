@@ -1,4 +1,4 @@
-.PHONY: help up down logs ps smoke edge test test-unit clean rebuild
+.PHONY: help up down logs ps smoke edge sink-test test test-unit clean rebuild
 
 help:
 	@echo "ztap-oss targets:"
@@ -10,7 +10,8 @@ help:
 	@echo "  make test-unit - run python unit tests for both custom components"
 	@echo "  make smoke     - run the end-to-end smoke test against a running stack"
 	@echo "  make edge      - run the edge-case integration tests (nasty types, UC, teardown)"
-	@echo "  make test      - unit tests + bring up stack + smoke + edge tests"
+	@echo "  make sink-test - run the Delta sink integration test (CDC -> Delta in MinIO)"
+	@echo "  make test      - unit tests + bring up stack + smoke + edge + sink tests"
 
 up:
 	docker compose up -d --build
@@ -33,6 +34,7 @@ rebuild:
 test-unit:
 	cd packages/type-engine && python -m pytest -q
 	cd services/control-plane && python -m pytest -q
+	cd services/sink && python -m pytest -q
 
 smoke:
 	bash scripts/smoke_test.sh
@@ -40,8 +42,12 @@ smoke:
 edge:
 	bash scripts/edge_tests.sh
 
+sink-test:
+	bash scripts/sink_test.sh
+
 test: test-unit up
 	@echo "waiting for services to settle..."
 	@sleep 20
 	bash scripts/smoke_test.sh
 	bash scripts/edge_tests.sh
+	bash scripts/sink_test.sh

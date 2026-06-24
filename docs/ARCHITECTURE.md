@@ -23,13 +23,17 @@ code or docs.
    │ (compute) │                  │ connector│            │ ztap.<proj>.*    │
    └───────────┘                  └──────────┘            └──────────────────┘
          │                                                         │
-         │ catalog + cdc schema                                   │ (Phase 2: sink)
+         │ catalog + cdc schema                          Delta sink│ (custom, Phase 2)
          ▼                                                         ▼
-   ┌──────────────┐                                        ┌──────────────┐
-   │ Unity Catalog│                                        │ MinIO (S3)   │
-   │ (governance) │                                        │  warehouse   │
+   ┌──────────────┐    storage_location points here ───▶   ┌──────────────┐
+   │ Unity Catalog│ ◀ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ │ MinIO (S3)   │
+   │ (governance) │       (registered table metadata)      │ Delta tables │
    └──────────────┘                                        └──────────────┘
 ```
+
+The loop is closed: a row written to Postgres is captured by Debezium, lands on
+Kafka, and the **Delta sink** appends it as a Delta Lake table in MinIO at the
+exact `storage_location` Unity Catalog registered for that table.
 
 ### Unity Catalog is populated, not decorative
 
@@ -48,16 +52,18 @@ holds the table's schema/metadata; the Parquet/Delta files are not yet written.
 
 | # | Component | Status | Where |
 |---|-----------|--------|-------|
-| 1 | Suspend/resume-aware connection proxy | **Phase 2** (design only) | — |
-| 2 | Bidirectional sync state machine (schema evolution) | **Phase 2** | — |
+| 1 | Suspend/resume-aware connection proxy | **design only** | — |
+| 2 | Bidirectional sync state machine (schema evolution) | **next** | — |
 | 3 | Control-plane API (the "project" abstraction) | **built + tested** | `services/control-plane` |
 | 4 | Type mapping + conflict-resolution engine | **built + tested** | `packages/type-engine` |
+| + | Delta sink (CDC → Delta tables in MinIO) | **built + tested** | `services/sink` |
 
-Components #3 and #4 are the ones buildable and verifiable end-to-end in a
-single pass, so they are done first. #4 is the silent-corruption risk; #3 is
-the developer-experience surface. #1 (systems-programming heavy, coupled to a
-Neon-style cplane/auth) and #2 (stateful, the hardest) are deliberately scoped
-out of Phase 1 and documented as design stubs.
+Components #3 and #4 were the ones buildable and verifiable end-to-end in a
+single pass, so they came first. #4 is the silent-corruption risk; #3 is the
+developer-experience surface. The **Delta sink** (Phase 2) closes the data loop
+so Unity Catalog's registered tables actually have Delta files behind them. #1
+(systems-programming heavy, coupled to a Neon-style cplane/auth) and #2 (the
+bidirectional sync state machine, the hardest) remain ahead.
 
 ## What this is NOT
 
@@ -75,5 +81,6 @@ out of Phase 1 and documented as design stubs.
 | MinIO API / console | 19000 / 19001 | 9000 / 9001 |
 | Unity Catalog | 18080 | 8080 |
 | Kafka (external) | 19092 | 9092 |
+| Delta sink | (no port; background consumer) | — |
 | Kafka Connect / Debezium | 18083 | 8083 |
 | Control plane API | 18000 | 8000 |

@@ -186,6 +186,23 @@ class Provisioner:
                 "publication.name": f"ztap_pub_{name}",
                 "publication.autocreate.mode": "disabled",
                 "snapshot.mode": "initial",
+                # Emit numeric/decimal as exact decimal strings ("19.99") rather
+                # than the default base64-encoded two's-complement bytes, so the
+                # sink can land them in a Delta column without decoding.
+                "decimal.handling.mode": "string",
+                # Emit plain JSON rows (no Connect schema envelope) and flatten
+                # the Debezium change event to just the new row state, so the
+                # sink can consume rows directly. Deletes are rewritten to a row
+                # carrying __deleted=true; __op / __ts_ms expose CDC metadata.
+                "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+                "key.converter.schemas.enable": "false",
+                "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+                "value.converter.schemas.enable": "false",
+                "transforms": "unwrap",
+                "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+                "transforms.unwrap.drop.tombstones": "false",
+                "transforms.unwrap.delete.handling.mode": "rewrite",
+                "transforms.unwrap.add.fields": "op,ts_ms",
             },
         }
         url = f"{self.s.connect_url}/connectors"

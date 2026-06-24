@@ -28,8 +28,12 @@ two custom "connective tissue" components that are fully testable.
 - **Custom #4 — type-engine** (`packages/type-engine`): Postgres↔Delta type
   mapping + conflict resolution, the piece most likely to cause silent
   corruption. Pure Python, honest about every lossy conversion.
+- **Custom Delta sink** (`services/sink`): consumes the CDC stream from Kafka
+  and writes **real Delta Lake tables into MinIO** (via delta-rs, no Spark) at
+  the exact `storage_location` Unity Catalog registered — closing the loop so a
+  Postgres row ends up queryable as Delta. Captures insert/update/delete.
 
-Deliberately **not** in Phase 1 (documented as design stubs in
+Deliberately **not** built yet (documented as design stubs in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)): the suspend/resume-aware
 connection proxy (#1) and the bidirectional sync state machine (#2).
 
@@ -90,8 +94,11 @@ reason. That's the silent-corruption surface made visible at registration time.
 ```
 docker-compose.yml          OSS data plane (offset ports, own network)
 services/control-plane/     custom #3 — FastAPI control plane + tests
+services/sink/              custom Delta sink — Kafka CDC -> Delta on MinIO + tests
 packages/type-engine/       custom #4 — type mapping + conflict engine + tests
-scripts/smoke_test.sh       end-to-end integration test
+scripts/smoke_test.sh       end-to-end CDC smoke test
+scripts/edge_tests.sh       edge-case integration tests (nasty types, UC, teardown)
+scripts/sink_test.sh        Delta sink integration test (insert/update/delete -> Delta)
 docs/                       ARCHITECTURE.md, LICENSES.md
 ```
 

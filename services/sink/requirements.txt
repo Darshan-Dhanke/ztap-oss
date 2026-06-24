@@ -1,0 +1,3 @@
+confluent-kafka==2.6.1
+deltalake==0.21.0
+pyarrow==17.0.0
