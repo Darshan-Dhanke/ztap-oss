@@ -20,7 +20,7 @@ volumes:
 services:
   # --- "compute": Postgres with logical replication enabled (CDC source) ---
   postgres:
-    image: postgres:16
+    image: ${POSTGRES_IMAGE:-postgres:16}
     container_name: ztap-postgres
     networks: [ztap]
     ports:
@@ -47,7 +47,7 @@ services:
 
   # --- lakehouse object store ---
   minio:
-    image: minio/minio:latest
+    image: ${MINIO_IMAGE:-minio/minio:latest}
     container_name: ztap-minio
     networks: [ztap]
     ports:
@@ -67,7 +67,7 @@ services:
 
   # create the warehouse bucket on startup, then exit
   minio-init:
-    image: minio/mc:latest
+    image: ${MC_IMAGE:-minio/mc:latest}
     container_name: ztap-minio-init
     networks: [ztap]
     depends_on:
@@ -83,7 +83,7 @@ services:
 
   # --- catalog / governance (Unity Catalog OSS, Apache-2.0) ---
   unity-catalog:
-    image: unitycatalog/unitycatalog:latest
+    image: ${UC_IMAGE:-unitycatalog/unitycatalog:latest}
     container_name: ztap-unity-catalog
     networks: [ztap]
     ports:
@@ -99,7 +99,7 @@ services:
 
   # --- event backbone (Kafka in KRaft mode, no ZooKeeper) ---
   kafka:
-    image: apache/kafka:3.8.0
+    image: ${KAFKA_IMAGE:-apache/kafka:3.8.0}
     container_name: ztap-kafka
     networks: [ztap]
     ports:
@@ -125,7 +125,7 @@ services:
 
   # --- WAL CDC: Kafka Connect + Debezium Postgres connector ---
   connect:
-    image: debezium/connect:2.7.3.Final
+    image: ${CONNECT_IMAGE:-debezium/connect:2.7.3.Final}
     container_name: ztap-connect
     networks: [ztap]
     ports:
@@ -173,6 +173,7 @@ services:
       CONNECT_URL: http://connect:8083
       UC_URL: http://unity-catalog:8080
       KAFKA_BOOTSTRAP: kafka:9092
+      PROXY_URL: http://proxy:8000
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8000/healthz || exit 1"]
       interval: 10s

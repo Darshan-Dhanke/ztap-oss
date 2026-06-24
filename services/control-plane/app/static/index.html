@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ztap-oss console</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2430; --border:#2a3340;
+    --text:#e6edf3; --muted:#8b98a5; --accent:#3b82f6; --accent2:#22c55e;
+    --warn:#f59e0b; --danger:#ef4444; --radius:12px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    background:var(--bg);color:var(--text);line-height:1.5}
+  header{padding:20px 28px;border-bottom:1px solid var(--border);
+    display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  header h1{font-size:20px;font-weight:600;margin:0;letter-spacing:.5px}
+  header .tag{font-size:12px;color:var(--muted);border:1px solid var(--border);
+    padding:2px 8px;border-radius:20px}
+  .wrap{max-width:1100px;margin:0 auto;padding:24px 28px;display:grid;gap:20px}
+  .grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px}
+  .panel h2{font-size:14px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);
+    margin:0 0 14px;font-weight:600}
+  .metric{background:var(--panel2);border-radius:10px;padding:14px 16px}
+  .metric .label{font-size:12px;color:var(--muted)}
+  .metric .value{font-size:26px;font-weight:600;margin-top:4px}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;vertical-align:middle}
+  .dot.active{background:var(--accent2)} .dot.suspended{background:var(--warn)}
+  .dot.waking{background:var(--accent)} .dot.unreachable{background:var(--danger)}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--border)}
+  th{color:var(--muted);font-weight:500;font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+  td code{background:var(--panel2);padding:2px 6px;border-radius:5px;font-size:12px}
+  .pill{font-size:11px;padding:2px 9px;border-radius:20px;background:rgba(34,197,94,.15);color:#4ade80}
+  button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--border);
+    background:var(--panel2);color:var(--text);padding:8px 14px;transition:.15s}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.warn{background:transparent;border-color:var(--warn);color:var(--warn)}
+  button.danger{background:transparent;border-color:var(--danger);color:var(--danger);padding:5px 10px;font-size:12px}
+  input{font:inherit;background:var(--panel2);border:1px solid var(--border);color:var(--text);
+    padding:8px 12px;border-radius:8px;outline:none}
+  input:focus{border-color:var(--accent)}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .links a{color:var(--accent);text-decoration:none;font-size:13px;margin-right:18px}
+  .links a:hover{text-decoration:underline}
+  .muted{color:var(--muted);font-size:13px}
+  #toast{position:fixed;bottom:20px;right:20px;background:var(--panel2);border:1px solid var(--border);
+    padding:12px 16px;border-radius:10px;font-size:13px;opacity:0;transition:.3s;max-width:360px}
+  #toast.show{opacity:1}
+</style>
+</head>
+<body>
+<header>
+  <h1>⚡ ztap-oss</h1>
+  <span class="tag">control plane console</span>
+  <span class="tag">educational Lakebase-style reconstruction</span>
+</header>
+
+<div class="wrap">
+  <div class="panel">
+    <h2>connection proxy (#1) — compute state</h2>
+    <div class="grid" id="proxy-metrics"><div class="muted">loading…</div></div>
+    <div class="row" style="margin-top:14px">
+      <button class="warn" onclick="suspendProxy()">Force compute suspend</button>
+      <span class="muted">Next connection through <code>:15432</code> triggers a cold-start wake.</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>projects</h2>
+    <div class="row" style="margin-bottom:16px">
+      <input id="newproj" placeholder="project name (e.g. analytics)" />
+      <button class="primary" onclick="createProject()">+ Create project</button>
+      <span class="muted">provisions PG schema + Unity Catalog + Debezium connector</span>
+    </div>
+    <table>
+      <thead><tr><th>name</th><th>status</th><th>pg schema</th><th>uc catalog</th><th>connector</th><th></th></tr></thead>
+      <tbody id="projects"><tr><td colspan="6" class="muted">loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="panel links">
+    <h2>other consoles</h2>
+    <a href="http://localhost:19001" target="_blank">MinIO console (Delta storage) ↗</a>
+    <a href="http://localhost:18000/docs" target="_blank">Control-plane API ↗</a>
+    <a href="http://localhost:18001/docs" target="_blank">Sync service API ↗</a>
+    <a href="http://localhost:18083/connectors" target="_blank">Kafka Connect ↗</a>
+    <a href="http://localhost:18002/state" target="_blank">Proxy state ↗</a>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+function toast(msg){const t=$("#toast");t.textContent=msg;t.classList.add("show");
+  clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove("show"),3500);}
+
+async function refresh(){
+  try{
+    const d = await (await fetch("/api/overview")).json();
+    renderProxy(d.proxy); renderProjects(d.projects);
+  }catch(e){ toast("refresh failed: "+e); }
+}
+
+function renderProxy(p){
+  if(!p){p={state:"unreachable"};}
+  const s = p.state||"unreachable";
+  const m = $("#proxy-metrics");
+  m.innerHTML = `
+    <div class="metric"><div class="label">state</div>
+      <div class="value"><span class="dot ${s}"></span>${s}</div></div>
+    <div class="metric"><div class="label">cold-start wakes</div>
+      <div class="value">${p.wake_count??"–"}</div></div>
+    <div class="metric"><div class="label">active connections</div>
+      <div class="value">${p.active_conns??"–"}</div></div>
+    <div class="metric"><div class="label">total connections</div>
+      <div class="value">${p.total_conns??"–"}</div></div>`;
+}
+
+function renderProjects(list){
+  const tb = $("#projects");
+  if(!list || !list.length){tb.innerHTML=`<tr><td colspan="6" class="muted">no projects yet — create one above</td></tr>`;return;}
+  tb.innerHTML = list.map(p=>`<tr>
+    <td><strong>${p.name}</strong></td>
+    <td><span class="pill">${p.status}</span></td>
+    <td><code>${p.schema||"–"}</code></td>
+    <td><code>${p.catalog||"–"}</code></td>
+    <td><code>${p.connector||"–"}</code></td>
+    <td><button class="danger" onclick="delProject('${p.name}')">delete</button></td>
+  </tr>`).join("");
+}
+
+async function createProject(){
+  const name = $("#newproj").value.trim();
+  if(!name){toast("enter a project name");return;}
+  const r = await fetch("/projects",{method:"POST",headers:{"content-type":"application/json"},
+    body:JSON.stringify({name})});
+  if(r.ok){toast("created project "+name);$("#newproj").value="";refresh();}
+  else{const e=await r.json();toast("error: "+(e.detail||r.status));}
+}
+async function delProject(name){
+  if(!confirm("Delete project "+name+"? This tears down PG schema, UC catalog and the connector."))return;
+  await fetch("/projects/"+name,{method:"DELETE"});
+  toast("deleted "+name);refresh();
+}
+async function suspendProxy(){
+  const r = await fetch("/api/proxy/suspend",{method:"POST"});
+  if(r.ok){toast("compute suspended — next connection will cold-start");refresh();}
+  else{toast("proxy unreachable");}
+}
+
+refresh();
+setInterval(refresh, 4000);
+</script>
+</body>
+</html>

@@ -7,11 +7,17 @@ connector, all wired together; deletion tears them down in reverse.
 
 from __future__ import annotations
 
+import pathlib
+
+import httpx
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from .provisioner import Provisioner, ProvisionError
 from .settings import settings
+
+_STATIC = pathlib.Path(__file__).parent / "static"
 
 app = FastAPI(
     title="ztap-oss control plane",
@@ -27,9 +33,39 @@ class CreateProjectRequest(BaseModel):
     name: str = Field(..., examples=["analytics"])
 
 
+@app.get("/", response_class=HTMLResponse)
+def dashboard():
+    """The ztap-oss console — a single-page visual control panel."""
+    return (_STATIC / "index.html").read_text(encoding="utf-8")
+
+
 @app.get("/healthz")
 def healthz():
     return {"status": "ok", "service": "ztap-control-plane"}
+
+
+@app.get("/api/overview")
+def overview():
+    """Aggregated state for the dashboard (projects + proxy), same-origin so the
+    browser needs no CORS. Proxy is best-effort: if it's down we still return
+    projects."""
+    proxy_state = None
+    try:
+        with httpx.Client(timeout=3) as c:
+            proxy_state = c.get(f"{settings.proxy_url}/state").json()
+    except Exception:  # noqa: BLE001
+        proxy_state = {"state": "unreachable"}
+    return {"projects": prov.list(), "proxy": proxy_state}
+
+
+@app.post("/api/proxy/suspend")
+def proxy_suspend():
+    """Forward a suspend command to the proxy (so the dashboard stays same-origin)."""
+    try:
+        with httpx.Client(timeout=3) as c:
+            return c.post(f"{settings.proxy_url}/suspend").json()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"proxy unreachable: {e}") from e
 
 
 @app.get("/config")
