@@ -67,12 +67,18 @@ The **Postgres** side (the "compute") with any client (pgAdmin, psql) at
 `localhost:55432` (db/user/pass `ztap`), or through the suspend/resume proxy at
 `localhost:15432`.
 
-The **lakehouse** side — the Delta tables the sink wrote to MinIO — with Trino:
+The **lakehouse** side — the Delta tables the sink wrote to MinIO — with Trino.
+Every Delta table is **auto-registered** (a `trino-init` sidecar scans MinIO and
+registers anything with a `_delta_log`, every 30s), so you just query. A table at
+`s3://warehouse/<project>/<table>` appears as `delta.lakehouse.<project>_<table>`:
 
 ```bash
-# register a Delta table and query it (idempotent helper)
-scripts/query_delta.sh lake orders
-scripts/query_delta.sh lake orders "SELECT _op, count(*) FROM %T GROUP BY _op"
+# list everything Trino can see
+docker exec ztap-trino trino --catalog delta --schema lakehouse --execute "SHOW TABLES"
+
+# query a table (no manual registration needed)
+docker exec ztap-trino trino --catalog delta --schema lakehouse \
+  --execute "SELECT _op, count(*) FROM lake_orders GROUP BY _op"
 
 # inspect the Delta transaction log (commit history)
 docker exec ztap-trino trino --catalog delta --schema lakehouse \
@@ -80,6 +86,7 @@ docker exec ztap-trino trino --catalog delta --schema lakehouse \
 ```
 
 Or point any Trino-compatible SQL client (DBeaver, etc.) at `localhost:18090`.
+`scripts/query_delta.sh <project> <table> ["SQL"]` is a convenience wrapper.
 
 ## Open the console
 

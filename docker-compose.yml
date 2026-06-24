@@ -198,6 +198,28 @@ services:
       timeout: 10s
       retries: 20
 
+  # auto-registers every Delta table in MinIO into Trino (and re-registers after
+  # restarts, since Trino's file metastore is ephemeral)
+  trino-init:
+    build:
+      context: .
+      dockerfile: services/trino-init/Dockerfile
+    container_name: ztap-trino-init
+    networks: [ztap]
+    depends_on:
+      trino:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      TRINO_HOST: trino
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      WAREHOUSE_BUCKET: ${WAREHOUSE_BUCKET:-warehouse}
+      REGISTER_INTERVAL: "30"
+    restart: unless-stopped
+
   # --- custom component #1: suspend/resume-aware connection proxy ---
   proxy:
     build:
