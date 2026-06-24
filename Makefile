@@ -1,4 +1,4 @@
-.PHONY: help up down logs ps smoke edge sink-test sync-test test test-unit clean rebuild
+.PHONY: help up down logs ps smoke edge sink-test sync-test proxy-test test test-unit test-go clean rebuild
 
 help:
 	@echo "ztap-oss targets:"
@@ -12,6 +12,7 @@ help:
 	@echo "  make edge      - run the edge-case integration tests (nasty types, UC, teardown)"
 	@echo "  make sink-test - run the Delta sink integration test (CDC -> Delta in MinIO)"
 	@echo "  make sync-test - run the sync test (schema evolution + reverse sync)"
+	@echo "  make proxy-test- run the proxy test (cold-start wake through the proxy)"
 	@echo "  make test      - unit tests + bring up stack + all integration tests"
 
 up:
@@ -38,6 +39,9 @@ test-unit:
 	cd services/sink && python -m pytest -q
 	cd services/sync && python -m pytest -q
 
+test-go:
+	docker run --rm -v "$(CURDIR)/services/proxy":/src -w /src golang:1.22-alpine go test ./...
+
 smoke:
 	bash scripts/smoke_test.sh
 
@@ -50,10 +54,14 @@ sink-test:
 sync-test:
 	bash scripts/sync_test.sh
 
-test: test-unit up
+proxy-test:
+	bash scripts/proxy_test.sh
+
+test: test-unit test-go up
 	@echo "waiting for services to settle..."
 	@sleep 20
 	bash scripts/smoke_test.sh
 	bash scripts/edge_tests.sh
 	bash scripts/sink_test.sh
 	bash scripts/sync_test.sh
+	bash scripts/proxy_test.sh

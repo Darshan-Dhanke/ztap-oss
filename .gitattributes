@@ -1,3 +1,6 @@
 # Shell scripts must stay LF or they break when run on Linux/in containers.
 *.sh text eol=lf
 Dockerfile text eol=lf
+# Go sources are built in a Linux container; keep them LF.
+*.go text eol=lf
+go.mod text eol=lf

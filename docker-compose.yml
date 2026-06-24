@@ -179,6 +179,29 @@ services:
       timeout: 5s
       retries: 20
 
+  # --- custom component #1: suspend/resume-aware connection proxy ---
+  proxy:
+    build:
+      context: .
+      dockerfile: services/proxy/Dockerfile
+    container_name: ztap-proxy
+    networks: [ztap]
+    ports:
+      - "15432:5432"   # Postgres wire protocol, through the proxy
+      - "18002:8000"   # proxy state/control HTTP API
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      BACKEND_ADDR: postgres:5432
+      IDLE_TIMEOUT_MS: "30000"
+      WAKE_DURATION_MS: "800"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
   # --- custom Phase 2 component: Delta sink (Kafka CDC -> Delta on MinIO) ---
   sink:
     build:

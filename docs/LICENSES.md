@@ -17,6 +17,9 @@ ztap's own **sink service** is original Apache-2.0 code; the Python libraries it
 depends on are permissive: `deltalake`/delta-rs (Apache-2.0), `pyarrow`
 (Apache-2.0), `confluent-kafka` Python client (Apache-2.0).
 
+The **connection proxy** (`services/proxy`) is original Apache-2.0 Go code with
+**no third-party dependencies** (Go standard library only).
+
 ## Things to actually watch
 
 - **MinIO is AGPL-3.0.** Running the stock image as a service you publish a

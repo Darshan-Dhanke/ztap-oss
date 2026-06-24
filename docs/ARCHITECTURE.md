@@ -52,19 +52,32 @@ holds the table's schema/metadata; the Parquet/Delta files are not yet written.
 
 | # | Component | Status | Where |
 |---|-----------|--------|-------|
-| 1 | Suspend/resume-aware connection proxy | **design only** | — |
+| 1 | Suspend/resume-aware connection proxy | **built + tested** | `services/proxy` |
 | 2 | Bidirectional sync state machine (schema evolution) | **built + tested** | `services/sync` |
 | 3 | Control-plane API (the "project" abstraction) | **built + tested** | `services/control-plane` |
 | 4 | Type mapping + conflict-resolution engine | **built + tested** | `packages/type-engine` |
 | + | Delta sink (CDC → Delta tables in MinIO) | **built + tested** | `services/sink` |
 
-Components #3 and #4 came first (buildable + verifiable in one pass); #4 is the
-silent-corruption risk, #3 the developer-experience surface. The **Delta sink**
-closed the data loop so Unity Catalog's tables have Delta files behind them.
-**#2, the sync state machine,** is now built: it reconciles PG↔UC schema drift
-and applies lakehouse→Postgres changes through the #4 conflict engine, with an
-idempotency ledger for loop-prevention. Only **#1** (systems-programming heavy,
-coupled to a Neon-style cplane/auth) remains a design stub.
+All four custom components plus the Delta sink are now built and tested. #4 is
+the silent-corruption risk, #3 the developer-experience surface; the **Delta
+sink** closed the data loop so Unity Catalog's tables have Delta files behind
+them; **#2** reconciles PG↔UC schema drift and applies lakehouse→Postgres
+changes through the #4 conflict engine; **#1** is the connection proxy below.
+
+### Component #1 — suspend/resume-aware connection proxy (`services/proxy`)
+
+A small Go TCP proxy in front of Postgres. When the (simulated) compute is
+suspended after an idle period, an incoming connection is **held open** while
+the proxy "wakes" it, then transparently spliced through to the backend — the
+client only experiences the cold-start latency.
+
+What is real: Postgres wire-protocol handling for SSL/GSS/startup negotiation,
+**buffering the startup packet** during the cold start, serializing concurrent
+connections through a single wake, and byte-level transparent proxying of a real
+`psql` session. What is simulated: suspending the *compute* itself (a state
+machine + a configurable wake delay), because this stack has no separated
+scale-to-zero compute to actually stop. A `/state` and `/suspend` HTTP API make
+the behavior observable and testable.
 
 ### Component #2 — the sync state machine (`services/sync`)
 
@@ -85,7 +98,8 @@ Two responsibilities, both with a pure, unit-tested core and a thin I/O layer:
 ## What this is NOT
 
 - Not Neon's autoscaling / scale-to-zero control plane (NeonVM/QEMU microVMs on
-  K8s) — that is its own multi-project effort and out of scope.
+  K8s) — that is its own multi-project effort and out of scope. The proxy (#1)
+  simulates compute suspend/resume; it does not actually stop a compute node.
 - Not the governance *product* (managed lineage, Catalog Explorer UI, Delta
   Sharing) — Unity Catalog OSS gives the metadata model and grants only.
 - Not for commercial or as-a-service deployment.
@@ -100,5 +114,7 @@ Two responsibilities, both with a pure, unit-tested core and a thin I/O layer:
 | Kafka (external) | 19092 | 9092 |
 | Delta sink | (no port; background consumer) | — |
 | Sync service | 18001 | 8000 |
+| Proxy (Postgres wire) | 15432 | 5432 |
+| Proxy (state/control API) | 18002 | 8000 |
 | Kafka Connect / Debezium | 18083 | 8083 |
 | Control plane API | 18000 | 8000 |
