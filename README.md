@@ -234,9 +234,12 @@ Deliberate, honest gaps:
   as triggered-only — it's the hardest part of bidirectional sync.
 - **Unity Catalog OSS is the metadata + grants foundation only** — no managed
   lineage, no Catalog Explorer UI, no Delta Sharing (those are commercial).
-- **Trino's metastore is the file metastore (ephemeral).** Registrations don't
-  survive a Trino restart on their own; the `trino-init` sidecar re-creates them
-  within ~30s.
+- **Trino uses the file metastore, not a shared Hive Metastore Service.** It is
+  now persistent (on a Docker volume), so registrations survive Trino restarts —
+  but it is single-node. Trino 450's Delta connector only supports thrift/Glue/
+  file metastores (not Unity Catalog directly), so a standalone HMS (thrift) is
+  the step up for a multi-node / shared catalog. `trino-init` handles new-table
+  discovery and reconciliation.
 - **Single-node, no HA, no auth/RBAC/TLS.** For learning and local use only.
 
 ---
