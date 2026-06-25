@@ -78,6 +78,7 @@ code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$CP/projects/$PROJ/tables
 
 echo "== EDGE 8: teardown removes catalog (and its schema/table) =="
 curl -s -X DELETE "$CP/projects/$PROJ" >/dev/null
+docker exec ztap-minio sh -c "mc alias set local http://localhost:9000 minioadmin minioadmin >/dev/null 2>&1; mc rm -r --force local/warehouse/$PROJ >/dev/null 2>&1" || true
 sleep 1
 code=$(curl -s -o /dev/null -w "%{http_code}" "$UC/api/2.1/unity-catalog/catalogs/ztap_${PROJ}")
 [ "$code" = "404" ] && { echo "  PASS: catalog gone (404)"; ok=$((ok+1)); } || { echo "  FAIL: catalog still $code"; bad=$((bad+1)); }

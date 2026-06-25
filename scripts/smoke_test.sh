@@ -73,6 +73,10 @@ echo "$MSG" | grep -q 'hello' && pass "CDC event observed on Kafka" || fail "no 
 
 echo "== 7. teardown =="
 curl -sf -X DELETE "$CP/projects/$PROJECT" >/dev/null && pass "project deleted" || fail "delete failed"
+# let any in-flight sink flush land, then remove the Delta data so no stale
+# table is left behind (the sink writes async, ~3s after the CDC event)
+sleep 6
+docker exec ztap-minio sh -c "mc alias set local http://localhost:9000 minioadmin minioadmin >/dev/null 2>&1; mc rm -r --force local/warehouse/${PROJECT} >/dev/null 2>&1" || true
 
 echo ""
 echo "ALL SMOKE TESTS PASSED"

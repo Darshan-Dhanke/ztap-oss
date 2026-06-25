@@ -55,6 +55,7 @@ PY
 
 echo "== teardown =="
 curl -s -X DELETE "$CP/projects/$P" >/dev/null
+docker exec ztap-minio mc rm -r --force "local/warehouse/$P" >/dev/null 2>&1 || true
 pass "torn down"
 echo ""
 echo "SINK INTEGRATION TEST PASSED"

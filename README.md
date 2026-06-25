@@ -69,20 +69,19 @@ The **Postgres** side (the "compute") with any client (pgAdmin, psql) at
 
 The **lakehouse** side — the Delta tables the sink wrote to MinIO — with Trino.
 Every Delta table is **auto-registered** (a `trino-init` sidecar scans MinIO and
-registers anything with a `_delta_log`, every 30s), so you just query. A table at
-`s3://warehouse/<project>/<table>` appears as `delta.lakehouse.<project>_<table>`:
+registers anything with a `_delta_log`, every 30s), so you just query. **The
+names mirror Postgres exactly**: a table at `s3://warehouse/<project>/<table>`
+is `delta.proj_<project>.<table>` in Trino — same schema and table name as the
+Postgres `proj_<project>.<table>` (only the catalog differs: `delta`).
 
 ```bash
-# list everything Trino can see
-docker exec ztap-trino trino --catalog delta --schema lakehouse --execute "SHOW TABLES"
-
-# query a table (no manual registration needed)
-docker exec ztap-trino trino --catalog delta --schema lakehouse \
-  --execute "SELECT _op, count(*) FROM lake_orders GROUP BY _op"
+# query a table (no manual registration needed) — same name as in Postgres
+docker exec ztap-trino trino --catalog delta --schema proj_lake \
+  --execute "SELECT _op, count(*) FROM orders GROUP BY _op"
 
 # inspect the Delta transaction log (commit history)
-docker exec ztap-trino trino --catalog delta --schema lakehouse \
-  --execute 'SELECT version, operation, timestamp FROM "lake_orders$history"'
+docker exec ztap-trino trino --catalog delta --schema proj_lake \
+  --execute 'SELECT version, operation, timestamp FROM "orders$history"'
 ```
 
 Or point any Trino-compatible SQL client (DBeaver, etc.) at `localhost:18090`.

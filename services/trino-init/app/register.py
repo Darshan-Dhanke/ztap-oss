@@ -8,8 +8,10 @@ queried. This sidecar makes that automatic: it scans MinIO for Delta tables
 projects, new sink output) appear within one interval, and registrations are
 re-created automatically if Trino restarts.
 
-Naming: a table at ``s3://warehouse/<project>/<table>`` is registered as
-``delta.lakehouse.<project>_<table>``.
+Naming mirrors Postgres exactly: a table at ``s3://warehouse/<project>/<table>``
+is registered as ``delta.proj_<project>.<table>`` — same schema name and same
+table name as the Postgres side (``proj_<project>.<table>``). Only the catalog
+differs (``delta`` vs the Postgres connection), which is what marks the source.
 """
 
 from __future__ import annotations
@@ -32,7 +34,8 @@ S3_SECRET = os.getenv("S3_SECRET_KEY", "minioadmin")
 BUCKET = os.getenv("WAREHOUSE_BUCKET", "warehouse")
 TRINO_HOST = os.getenv("TRINO_HOST", "trino")
 TRINO_PORT = int(os.getenv("TRINO_PORT", "8080"))
-SCHEMA = os.getenv("TRINO_SCHEMA", "lakehouse")
+# Trino schema is named to match the Postgres schema: proj_<project>.
+SCHEMA_PREFIX = os.getenv("TRINO_SCHEMA_PREFIX", "proj_")
 INTERVAL = int(os.getenv("REGISTER_INTERVAL", "30"))
 
 _DELTA_MARKER = "/_delta_log/"
@@ -62,41 +65,90 @@ def discover_tables(client) -> list[str]:
     return sorted(locs)
 
 
-def ensure_schema(cur) -> None:
+def _split(loc: str) -> tuple[str, str]:
+    """'lake/orders' -> (schema 'proj_lake', table 'orders')."""
+    parts = loc.split("/")
+    project = parts[0]
+    table = "_".join(parts[1:]) if len(parts) > 1 else project
+    return f"{SCHEMA_PREFIX}{project}", table
+
+
+def ensure_schema(cur, schema: str, project: str) -> None:
     cur.execute(
-        f"CREATE SCHEMA IF NOT EXISTS delta.{SCHEMA} "
-        f"WITH (location = 's3://{BUCKET}/{SCHEMA}')"
+        f"CREATE SCHEMA IF NOT EXISTS delta.{schema} "
+        f"WITH (location = 's3://{BUCKET}/{project}')"
     )
     cur.fetchall()
 
 
-def register(cur, loc: str) -> bool:
-    name = loc.replace("/", "_")
-    location = f"s3://{BUCKET}/{loc}"
+def register(cur, schema: str, table: str, location: str) -> bool:
     try:
         cur.execute(
             f"CALL delta.system.register_table("
-            f"schema_name => '{SCHEMA}', table_name => '{name}', "
+            f"schema_name => '{schema}', table_name => '{table}', "
             f"table_location => '{location}')"
         )
         cur.fetchall()
-        log.info("registered delta.%s.%s -> %s", SCHEMA, name, location)
+        log.info("registered delta.%s.%s -> %s", schema, table, location)
         return True
     except TrinoUserError as e:
         if "already exists" in str(e).lower():
             return False
-        log.warning("register %s failed: %s", name, e)
+        log.warning("register %s.%s failed: %s", schema, table, e)
         return False
+
+
+def reconcile(cur, current_locs: list[str]) -> int:
+    """Drop registrations whose Delta data no longer exists in MinIO, so Trino's
+    view always matches ground truth (and stale test tables disappear)."""
+    current = set(current_locs)
+    cur.execute("SHOW SCHEMAS FROM delta")
+    schemas = [r[0] for r in cur.fetchall() if r[0].startswith(SCHEMA_PREFIX)]
+    removed = 0
+    for schema in schemas:
+        project = schema[len(SCHEMA_PREFIX):]
+        cur.execute(f"SHOW TABLES FROM delta.{schema}")
+        tables = [r[0] for r in cur.fetchall()]
+        for table in tables:
+            if f"{project}/{table}" not in current:
+                try:
+                    cur.execute(
+                        f"CALL delta.system.unregister_table("
+                        f"schema_name => '{schema}', table_name => '{table}')"
+                    )
+                    cur.fetchall()
+                    log.info("unregistered stale delta.%s.%s", schema, table)
+                    removed += 1
+                except TrinoUserError as e:
+                    log.warning("unregister %s.%s failed: %s", schema, table, e)
+        cur.execute(f"SHOW TABLES FROM delta.{schema}")
+        if not cur.fetchall():
+            try:
+                cur.execute(f"DROP SCHEMA delta.{schema}")
+                cur.fetchall()
+                log.info("dropped empty schema delta.%s", schema)
+            except TrinoUserError as e:
+                log.warning("drop schema %s failed: %s", schema, e)
+    return removed
 
 
 def cycle(client) -> None:
     conn = connect(host=TRINO_HOST, port=TRINO_PORT, user="ztap-trino-init", catalog="delta")
     try:
         cur = conn.cursor()
-        ensure_schema(cur)
         locs = discover_tables(client)
-        new = sum(register(cur, loc) for loc in locs)
-        log.info("sync complete: %d delta table(s) visible (%d newly registered)", len(locs), new)
+        schemas_done: set[str] = set()
+        new = 0
+        for loc in locs:
+            project = loc.split("/")[0]
+            schema, table = _split(loc)
+            if schema not in schemas_done:
+                ensure_schema(cur, schema, project)
+                schemas_done.add(schema)
+            new += register(cur, schema, table, f"s3://{BUCKET}/{loc}")
+        removed = reconcile(cur, locs)
+        log.info("sync complete: %d delta table(s) visible (%d new, %d stale removed)",
+                 len(locs), new, removed)
     finally:
         conn.close()
 

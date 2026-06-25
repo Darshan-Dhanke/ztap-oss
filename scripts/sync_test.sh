@@ -79,6 +79,8 @@ CNT=$($PSQL -tAc "SELECT count(*) FROM proj_$P.items WHERE id=2;")
 
 echo "== teardown =="
 curl -s -X DELETE "$CP/projects/$P" >/dev/null
+sleep 6  # let any in-flight sink flush land before removing the Delta data
+docker exec ztap-minio sh -c "mc alias set local http://localhost:9000 minioadmin minioadmin >/dev/null 2>&1; mc rm -r --force local/warehouse/$P >/dev/null 2>&1" || true
 pass "torn down"
 
 echo ""
