@@ -1,0 +1,13 @@
+# This file contains a specific per-tenant's config.
+#  It is read in case of pageserver restart.
+[mode.Attached]
+generation = 1
+attach_mode = "Single"
+
+[shard]
+number = 0
+count = 0
+stripe_size = 2048
+layout = 1
+
+[tenant_conf]

@@ -1,0 +1,148 @@
+# Neon OSS storage/compute, adapted from neondatabase/neon's reference compose to
+# run on ztap's existing MinIO (so Postgres pages and the Delta lakehouse share
+# one object-storage substrate). Run merged with the main stack:
+#   docker compose -f docker-compose.yml -f docker-compose.neon.yml up -d <svc>
+#
+# Pages land in the MinIO "neon" bucket; the compute is reachable as Postgres on
+# host port 55434 (user/pass cloud_admin).
+
+volumes:
+  neonpagedata:
+
+services:
+  # copy the pageserver config into a Linux-native named volume. The pageserver
+  # stores layer data under /data/.neon and needs real POSIX fsync — a Windows
+  # bind mount breaks "flush after timeline creation", so we use a named volume.
+  neon-pageserver-init:
+    image: busybox:1.36
+    container_name: ztap-neon-pageserver-init
+    networks: [ztap]
+    volumes:
+      - neonpagedata:/data/.neon
+      - ./neon/pageserver_config:/cfg:ro
+    command: sh -c "cp /cfg/pageserver.toml /cfg/identity.toml /data/.neon/ && chmod -R 777 /data/.neon && echo 'pageserver config staged'"
+    restart: "no"
+
+  # create the "neon" bucket on ztap's MinIO
+  neon-bucket-init:
+    image: ${MC_IMAGE:-minio/mc:latest}
+    container_name: ztap-neon-bucket-init
+    networks: [ztap]
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin} &&
+      mc mb --ignore-existing local/neon &&
+      echo 'neon bucket ready';
+      "
+    restart: "no"
+
+  storage_broker:
+    image: ${NEON_IMAGE:-ghcr.io/neondatabase/neon:latest}
+    container_name: ztap-neon-broker
+    networks: [ztap]
+    command: ["storage_broker", "--listen-addr=0.0.0.0:50051"]
+    restart: unless-stopped
+
+  pageserver:
+    image: ${NEON_IMAGE:-ghcr.io/neondatabase/neon:latest}
+    container_name: ztap-neon-pageserver
+    networks: [ztap]
+    environment:
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "19898:9898"
+    volumes:
+      - neonpagedata:/data/.neon
+    depends_on:
+      neon-pageserver-init:
+        condition: service_completed_successfully
+      storage_broker:
+        condition: service_started
+      neon-bucket-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  safekeeper1:
+    image: ${NEON_IMAGE:-ghcr.io/neondatabase/neon:latest}
+    container_name: ztap-neon-sk1
+    networks: [ztap]
+    environment:
+      - SAFEKEEPER_ADVERTISE_URL=safekeeper1:5454
+      - SAFEKEEPER_ID=1
+      - BROKER_ENDPOINT=http://storage_broker:50051
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "safekeeper --listen-pg=$$SAFEKEEPER_ADVERTISE_URL --listen-http='0.0.0.0:7676' --id=$$SAFEKEEPER_ID --broker-endpoint=$$BROKER_ENDPOINT -D /data --remote-storage=\"{endpoint='http://minio:9000',bucket_name='neon',bucket_region='eu-north-1',prefix_in_bucket='/safekeeper/'}\""
+    depends_on:
+      - storage_broker
+      - neon-bucket-init
+    restart: unless-stopped
+
+  safekeeper2:
+    image: ${NEON_IMAGE:-ghcr.io/neondatabase/neon:latest}
+    container_name: ztap-neon-sk2
+    networks: [ztap]
+    environment:
+      - SAFEKEEPER_ADVERTISE_URL=safekeeper2:5454
+      - SAFEKEEPER_ID=2
+      - BROKER_ENDPOINT=http://storage_broker:50051
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "safekeeper --listen-pg=$$SAFEKEEPER_ADVERTISE_URL --listen-http='0.0.0.0:7676' --id=$$SAFEKEEPER_ID --broker-endpoint=$$BROKER_ENDPOINT -D /data --remote-storage=\"{endpoint='http://minio:9000',bucket_name='neon',bucket_region='eu-north-1',prefix_in_bucket='/safekeeper/'}\""
+    depends_on:
+      - storage_broker
+      - neon-bucket-init
+    restart: unless-stopped
+
+  safekeeper3:
+    image: ${NEON_IMAGE:-ghcr.io/neondatabase/neon:latest}
+    container_name: ztap-neon-sk3
+    networks: [ztap]
+    environment:
+      - SAFEKEEPER_ADVERTISE_URL=safekeeper3:5454
+      - SAFEKEEPER_ID=3
+      - BROKER_ENDPOINT=http://storage_broker:50051
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "safekeeper --listen-pg=$$SAFEKEEPER_ADVERTISE_URL --listen-http='0.0.0.0:7676' --id=$$SAFEKEEPER_ID --broker-endpoint=$$BROKER_ENDPOINT -D /data --remote-storage=\"{endpoint='http://minio:9000',bucket_name='neon',bucket_region='eu-north-1',prefix_in_bucket='/safekeeper/'}\""
+    depends_on:
+      - storage_broker
+      - neon-bucket-init
+    restart: unless-stopped
+
+  neon-compute:
+    build:
+      context: ./neon/compute_wrapper/
+      args:
+        - REPOSITORY=ghcr.io/neondatabase
+        - COMPUTE_IMAGE=compute-node-v16
+        - TAG=latest
+    image: ztap-neon-compute
+    container_name: ztap-neon-compute
+    networks:
+      ztap:
+        aliases: [compute]
+    environment:
+      - PG_VERSION=16
+    volumes:
+      - ./neon/compute_wrapper/var/db/postgres/configs/:/var/db/postgres/configs/
+      - ./neon/compute_wrapper/shell/:/shell/
+    ports:
+      - "55434:55433"
+    entrypoint: ["/shell/compute.sh"]
+    depends_on:
+      - safekeeper1
+      - safekeeper2
+      - safekeeper3
+      - pageserver
+    restart: unless-stopped
