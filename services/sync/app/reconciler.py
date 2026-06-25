@@ -174,6 +174,17 @@ def reverse_sync(
 
     with psycopg.connect(settings.pg_dsn(), row_factory=dict_row) as conn:
         conn.autocommit = False
+        # Only ever write columns that actually exist in the Postgres table, so
+        # extra lakehouse-side columns (e.g. an inbox's _lake_version marker) are
+        # ignored rather than causing an "column does not exist" error.
+        pg_cols = {
+            row["column_name"]
+            for row in conn.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = %s AND table_name = %s",
+                (schema, table),
+            ).fetchall()
+        }
         for r in rows:
             if pk_col not in r:
                 raise ReconcileError(f"row missing pk column {pk_col!r}: {r}")
@@ -189,7 +200,8 @@ def reverse_sync(
             )
 
             if decision.action in (ReverseAction.APPLY, ReverseAction.APPLY_MERGE):
-                _upsert(conn, schema, table, pk_col, decision.values or r)
+                vals = {k: v for k, v in (decision.values or r).items() if k in pg_cols}
+                _upsert(conn, schema, table, pk_col, vals)
                 _record_applied(conn, name, table, str(pk), version)
             results.append({"pk": pk, "action": decision.action.value, "reason": decision.reason})
         conn.commit()

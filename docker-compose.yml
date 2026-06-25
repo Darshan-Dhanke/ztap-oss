@@ -256,6 +256,33 @@ services:
       timeout: 5s
       retries: 20
 
+  # --- continuous lakehouse -> Postgres reverse sync (component #2) ---
+  # Watches each project's *_inbox Delta table and auto-applies new rows to
+  # Postgres via the sync service. Write to the inbox from Trino/DBeaver.
+  reverse-watcher:
+    build:
+      context: .
+      dockerfile: services/reverse-watcher/Dockerfile
+    container_name: ztap-reverse-watcher
+    networks: [ztap]
+    depends_on:
+      minio:
+        condition: service_healthy
+      sync:
+        condition: service_healthy
+    environment:
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      WAREHOUSE_BUCKET: ${WAREHOUSE_BUCKET:-warehouse}
+      SYNC_URL: http://sync:8000
+      PG_HOST: postgres
+      PG_USER: ${POSTGRES_USER:-ztap}
+      PG_PASSWORD: ${POSTGRES_PASSWORD:-ztap}
+      PG_DB: ${POSTGRES_DB:-ztap}
+      WATCH_INTERVAL: "10"
+    restart: unless-stopped
+
   # --- custom component #1: suspend/resume-aware connection proxy ---
   proxy:
     build:

@@ -12,7 +12,8 @@ help:
 	@echo "  make edge      - run the edge-case integration tests (nasty types, UC, teardown)"
 	@echo "  make sink-test - run the Delta sink integration test (CDC -> Delta in MinIO)"
 	@echo "  make sync-test - run the sync test (schema evolution + reverse sync)"
-	@echo "  make proxy-test- run the proxy test (cold-start wake through the proxy)"
+	@echo "  make proxy-test- run the proxy test (real container suspend/resume)"
+	@echo "  make rwatch-test - run the continuous reverse-sync (inbox) test"
 	@echo "  make query-delta - register + query the lake/orders Delta table via Trino"
 	@echo "  make test      - unit tests + bring up stack + all integration tests"
 
@@ -58,6 +59,9 @@ sync-test:
 proxy-test:
 	bash scripts/proxy_test.sh
 
+rwatch-test:
+	bash scripts/reverse_watch_test.sh
+
 query-delta:
 	bash scripts/query_delta.sh
 
@@ -69,3 +73,4 @@ test: test-unit test-go up
 	bash scripts/sink_test.sh
 	bash scripts/sync_test.sh
 	bash scripts/proxy_test.sh
+	bash scripts/reverse_watch_test.sh

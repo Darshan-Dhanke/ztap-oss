@@ -231,10 +231,14 @@ Deliberate, honest gaps:
   fast page-reattach from separated storage, and it's a single dedicated compute,
   not per-project autoscaling on microVMs. Suspend is triggered explicitly
   (`AUTO_SUSPEND=false` by default) because the compute is a shared node.
-- **Reverse sync (lakehouse → Postgres) is API-triggered, not continuous.** A
-  raw `INSERT` in Trino/DBeaver does not propagate to Postgres; you call the sync
-  service. A continuous "watch Delta and auto-apply" worker is the one piece left
-  as triggered-only — it's the hardest part of bidirectional sync.
+- **Reverse sync runs in two modes.** Triggered: call the sync service's
+  `/reverse-sync` directly. Continuous: write into a project's **inbox** Delta
+  table (`scripts/make_inbox.sh`) from Trino/DBeaver and the `reverse-watcher`
+  auto-applies new rows to Postgres within ~10s — no API call. Loop-prevention is
+  structural: the inbox is written only by external writers (Postgres echoes go
+  to the main feed, never the inbox), and the idempotency ledger applies each
+  `_lake_version` once. It polls the whole inbox each cycle (fine at small scale);
+  Delta Change Data Feed would make it incremental.
 - **Unity Catalog OSS is the metadata + grants foundation only** — no managed
   lineage, no Catalog Explorer UI, no Delta Sharing (those are commercial).
 - **Trino uses the file metastore, not a shared Hive Metastore Service.** It is

@@ -29,6 +29,7 @@ MAP=(
   "ztap-oss-sync:latest=ztap-sync"
   "ztap-oss-proxy:latest=ztap-proxy"
   "ztap-oss-trino-init:latest=ztap-trino-init"
+  "ztap-oss-reverse-watcher:latest=ztap-reverse-watcher"
 )
 
 echo "Mirroring ${#MAP[@]} images to namespace '$NS'..."

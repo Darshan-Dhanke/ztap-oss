@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Create an "inbox" Delta table for a project table, writable from Trino/DBeaver.
+# Rows you INSERT into it are auto-applied to Postgres by the reverse-watcher.
+#
+# Usage: scripts/make_inbox.sh <project> <table> "<col1 type1, col2 type2, ...>"
+# Example:
+#   scripts/make_inbox.sh sales orders "id bigint, customer varchar, amount decimal(10,2)"
+#
+# The inbox schema must include the Postgres primary key column plus a
+# _lake_version bigint marker (added automatically here).
+set -uo pipefail
+export MSYS_NO_PATHCONV=1
+export MSYS2_ARG_CONV_EXCL='*'
+
+PROJECT="${1:?usage: make_inbox.sh <project> <table> \"<cols>\"}"
+TABLE="${2:?usage: make_inbox.sh <project> <table> \"<cols>\"}"
+COLS="${3:?provide column defs, e.g. \"id bigint, customer varchar, amount decimal(10,2)\"}"
+
+SCHEMA="proj_${PROJECT}"
+INBOX="${TABLE}_inbox"
+LOC="s3://warehouse/${PROJECT}/${INBOX}"
+
+T(){ docker exec ztap-trino trino --catalog delta --execute "$1" 2>&1 | grep -vE 'terminal|jline|Log logr'; }
+
+echo "creating Delta inbox table delta.${SCHEMA}.${INBOX} at ${LOC} ..."
+T "CREATE SCHEMA IF NOT EXISTS delta.${SCHEMA} WITH (location = 's3://warehouse/${PROJECT}')" >/dev/null
+T "DROP TABLE IF EXISTS delta.${SCHEMA}.${INBOX}" >/dev/null
+T "CREATE TABLE delta.${SCHEMA}.${INBOX} (${COLS}, _lake_version bigint)
+   WITH (location = '${LOC}')"
+
+echo ""
+echo "Done. Write to it from Trino/DBeaver, e.g.:"
+echo "  INSERT INTO delta.${SCHEMA}.${INBOX} VALUES (...);"
+echo "The reverse-watcher will apply new rows to Postgres ${SCHEMA}.${TABLE} within ~10s."
