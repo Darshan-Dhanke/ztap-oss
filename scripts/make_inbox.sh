@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
-# Create an "inbox" Delta table for a project table, writable from Trino/DBeaver.
-# Rows you INSERT into it are auto-applied to Postgres by the reverse-watcher.
+# Create the lakehouse write surface ("inbox") for a project table. Run normal
+# INSERT / UPDATE / DELETE against it from Trino/DBeaver and the reverse-watcher
+# applies each change to Postgres (proj_<project>.<table>) within ~10s.
+#
+# The inbox is a Change-Data-Feed-enabled Delta table whose columns mirror the
+# Postgres table (no bookkeeping columns — the watcher tracks progress itself).
 #
 # Usage: scripts/make_inbox.sh <project> <table> "<col1 type1, col2 type2, ...>"
 # Example:
-#   scripts/make_inbox.sh sales orders "id bigint, customer varchar, amount decimal(10,2)"
-#
-# The inbox schema must include the Postgres primary key column plus a
-# _lake_version bigint marker (added automatically here).
+#   scripts/make_inbox.sh demo orders "id bigint, customer varchar, amount decimal(10,2)"
 set -uo pipefail
 export MSYS_NO_PATHCONV=1
 export MSYS2_ARG_CONV_EXCL='*'
 
 PROJECT="${1:?usage: make_inbox.sh <project> <table> \"<cols>\"}"
 TABLE="${2:?usage: make_inbox.sh <project> <table> \"<cols>\"}"
-COLS="${3:?provide column defs, e.g. \"id bigint, customer varchar, amount decimal(10,2)\"}"
+COLS="${3:?provide column defs matching the Postgres table, e.g. \"id bigint, customer varchar, amount decimal(10,2)\"}"
 
 SCHEMA="proj_${PROJECT}"
 INBOX="${TABLE}_inbox"
@@ -22,13 +23,15 @@ LOC="s3://warehouse/${PROJECT}/${INBOX}"
 
 T(){ docker exec ztap-trino trino --catalog delta --execute "$1" 2>&1 | grep -vE 'terminal|jline|Log logr'; }
 
-echo "creating Delta inbox table delta.${SCHEMA}.${INBOX} at ${LOC} ..."
+echo "creating CDF-enabled inbox delta.${SCHEMA}.${INBOX} at ${LOC} ..."
 T "CREATE SCHEMA IF NOT EXISTS delta.${SCHEMA} WITH (location = 's3://warehouse/${PROJECT}')" >/dev/null
 T "DROP TABLE IF EXISTS delta.${SCHEMA}.${INBOX}" >/dev/null
-T "CREATE TABLE delta.${SCHEMA}.${INBOX} (${COLS}, _lake_version bigint)
-   WITH (location = '${LOC}')"
+T "CREATE TABLE delta.${SCHEMA}.${INBOX} (${COLS})
+   WITH (location = '${LOC}', change_data_feed_enabled = true)"
 
 echo ""
-echo "Done. Write to it from Trino/DBeaver, e.g.:"
+echo "Done. From Trino/DBeaver, run normal DML on delta.${SCHEMA}.${INBOX}:"
 echo "  INSERT INTO delta.${SCHEMA}.${INBOX} VALUES (...);"
-echo "The reverse-watcher will apply new rows to Postgres ${SCHEMA}.${TABLE} within ~10s."
+echo "  UPDATE delta.${SCHEMA}.${INBOX} SET <col>=<v> WHERE ...;"
+echo "  DELETE FROM delta.${SCHEMA}.${INBOX} WHERE ...;"
+echo "The reverse-watcher applies each change to Postgres ${SCHEMA}.${TABLE} within ~10s."

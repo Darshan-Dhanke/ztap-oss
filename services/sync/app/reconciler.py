@@ -210,6 +210,42 @@ def reverse_sync(
     return {"table": f"{schema}.{table}", "applied": applied, "results": results}
 
 
+def reverse_apply(name: str, table: str, changes: list[dict], *, pk_col: str) -> dict:
+    """Apply already-resolved lakehouse changes (from the inbox CDF) to Postgres.
+
+    ``changes`` is an ordered list of {"op": "upsert"|"delete", "row": {...}}.
+    The lakehouse is authoritative for inbox writes, so there's no per-row
+    conflict policy here — exactly-once + ordering are guaranteed by the watcher
+    (it tracks the inbox's Delta version). Columns not present in the Postgres
+    table (CDF metadata, etc.) are ignored.
+    """
+    schema = f"proj_{name}"
+    applied = {"upsert": 0, "delete": 0}
+    with psycopg.connect(settings.pg_dsn(), row_factory=dict_row) as conn:
+        conn.autocommit = False
+        pg_cols = {
+            r["column_name"]
+            for r in conn.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = %s AND table_name = %s",
+                (schema, table),
+            ).fetchall()
+        }
+        for ch in changes:
+            row = ch.get("row", {})
+            if pk_col not in row:
+                raise ReconcileError(f"change missing pk column {pk_col!r}: {row}")
+            if ch.get("op") == "delete":
+                conn.execute(f'DELETE FROM "{schema}"."{table}" WHERE "{pk_col}" = %s', (row[pk_col],))
+                applied["delete"] += 1
+            else:
+                vals = {k: v for k, v in row.items() if k in pg_cols}
+                _upsert(conn, schema, table, pk_col, vals)
+                applied["upsert"] += 1
+        conn.commit()
+    return {"table": f"{schema}.{table}", "applied": applied}
+
+
 def _upsert(conn, schema: str, table: str, pk_col: str, values: dict) -> None:
     cols = list(values.keys())
     placeholders = ", ".join(["%s"] * len(cols))

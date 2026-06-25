@@ -233,14 +233,16 @@ Deliberate, honest gaps:
   fast page-reattach from separated storage, and it's a single dedicated compute,
   not per-project autoscaling on microVMs. Suspend is triggered explicitly
   (`AUTO_SUSPEND=false` by default) because the compute is a shared node.
-- **Reverse sync runs in two modes.** Triggered: call the sync service's
-  `/reverse-sync` directly. Continuous: write into a project's **inbox** Delta
-  table (`scripts/make_inbox.sh`) from Trino/DBeaver and the `reverse-watcher`
-  auto-applies new rows to Postgres within ~10s — no API call. Loop-prevention is
-  structural: the inbox is written only by external writers (Postgres echoes go
-  to the main feed, never the inbox), and the idempotency ledger applies each
-  `_lake_version` once. It polls the whole inbox each cycle (fine at small scale);
-  Delta Change Data Feed would make it incremental.
+- **Reverse sync (lakehouse → Postgres) is continuous and supports
+  insert/update/delete.** Create a project's **inbox** with
+  `scripts/make_inbox.sh` (a Change-Data-Feed–enabled Delta table), then run
+  normal `INSERT`/`UPDATE`/`DELETE` on it from Trino/DBeaver. The
+  `reverse-watcher` reads the inbox's Delta CDF since the version it last
+  processed, collapses it to the net change per key, and applies upserts/deletes
+  to Postgres within ~10s — no version numbers. Exactly-once + ordering come from
+  the tracked Delta version; loop-prevention is structural (the inbox is written
+  only from the lakehouse side; Postgres CDC flows to the main feed, never the
+  inbox). A one-shot `/reverse-sync` API also exists for triggered use.
 - **Unity Catalog OSS is the metadata + grants foundation only** — no managed
   lineage, no Catalog Explorer UI, no Delta Sharing (those are commercial).
 - **Trino uses the file metastore, not a shared Hive Metastore Service.** It is

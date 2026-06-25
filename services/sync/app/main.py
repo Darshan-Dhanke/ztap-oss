@@ -13,7 +13,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from .reconciler import reconcile_schema, reverse_sync, ReconcileError
+from .reconciler import reconcile_schema, reverse_sync, reverse_apply, ReconcileError
 
 app = FastAPI(
     title="ztap-oss sync service",
@@ -60,4 +60,18 @@ def reverse(name: str, table: str, req: ReverseSyncRequest):
     except ReconcileError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+class ReverseApplyRequest(BaseModel):
+    changes: list[dict] = Field(..., description="ordered [{op: upsert|delete, row: {...}}]")
+    pk_col: str
+
+
+@app.post("/projects/{name}/tables/{table}/reverse-apply")
+def reverse_apply_ep(name: str, table: str, req: ReverseApplyRequest):
+    """Apply resolved lakehouse CDF changes (upsert/delete) to Postgres."""
+    try:
+        return reverse_apply(name, table, req.changes, pk_col=req.pk_col)
+    except ReconcileError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
