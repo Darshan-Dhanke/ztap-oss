@@ -223,11 +223,14 @@ All integration tests self-clean (they remove their own Delta data), and
 This is a faithful reconstruction of the *architecture*, not a production system.
 Deliberate, honest gaps:
 
-- **The proxy simulates compute suspend/resume.** There is no separated
-  scale-to-zero compute to actually stop; the proxy implements the connection
-  hold + cold-start state machine and transparent proxying, but the "suspend" is
-  a state flag plus a wake delay. (Neon's real autoscaling control plane —
-  NeonVM/QEMU microVMs on K8s — is out of scope.)
+- **The proxy does real container-level suspend/resume, but not Neon-style
+  storage/compute separation.** It fronts a dedicated `ztap-compute` Postgres and
+  genuinely stops/starts that container via the Docker API — so cold-start
+  latency and freed CPU/RAM are real and measurable (see `last_cold_start_ms` at
+  `:18002/state`). What it is *not*: resume is a full Postgres boot, not Neon's
+  fast page-reattach from separated storage, and it's a single dedicated compute,
+  not per-project autoscaling on microVMs. Suspend is triggered explicitly
+  (`AUTO_SUSPEND=false` by default) because the compute is a shared node.
 - **Reverse sync (lakehouse → Postgres) is API-triggered, not continuous.** A
   raw `INSERT` in Trino/DBeaver does not propagate to Postgres; you call the sync
   service. A continuous "watch Delta and auto-apply" worker is the one piece left

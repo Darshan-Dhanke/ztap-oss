@@ -68,11 +68,11 @@
       <button class="warn" onclick="suspendProxy()">Force suspend</button>
     </div>
     <p class="muted" style="margin:12px 0 0">
-      <strong>“suspended” is normal, not an error.</strong> This is scale-to-zero:
-      after ~30s idle the (simulated) compute suspends. Nothing routes through the
-      proxy by default — the services talk to Postgres directly — so it sits idle.
-      A client connecting on <code>:15432</code> (or the Wake button) cold-starts it
-      back to <em>active</em>; each wake is counted above.
+      <strong>Real scale-to-zero.</strong> The proxy fronts a dedicated compute
+      Postgres (<code>ztap-compute</code>) and actually stops/starts that
+      container. <em>Force suspend</em> genuinely stops it (frees CPU/RAM);
+      <em>Wake compute</em> (or any client on <code>:15432</code>) starts it with
+      a real, measured cold start (<code>last_cold_start_ms</code> above).
     </p>
   </div>
 

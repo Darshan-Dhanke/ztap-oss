@@ -43,27 +43,63 @@ type manager struct {
 	idleTimeout  time.Duration
 	wakeDuration time.Duration
 
+	// real suspend/resume: when set, the proxy stops/starts an actual container
+	// via the Docker API instead of using a sleep timer.
+	docker           *dockerClient
+	computeContainer string
+	autoSuspend      bool
+
 	mu          sync.Mutex
 	state       string
 	activeConns int
 	idleTimer   *time.Timer
 
-	wakeMu     sync.Mutex // serializes cold-start wakes
-	totalConns int64
-	wakeCount  int64
+	wakeMu          sync.Mutex // serializes cold-start wakes
+	totalConns      int64
+	wakeCount       int64
+	lastColdStartMs int64
 }
+
+func (m *manager) realSuspend() bool { return m.docker != nil && m.computeContainer != "" }
 
 func (m *manager) snapshot() map[string]any {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	st := m.state
+	conns := m.activeConns
+	m.mu.Unlock()
+
+	mode := "simulated"
+	containerRunning := any(nil)
+	if m.realSuspend() {
+		mode = "real (docker stop/start)"
+		if r, err := m.docker.running(m.computeContainer); err == nil {
+			containerRunning = r
+			// keep reported state honest with the actual container
+			if conns == 0 {
+				m.mu.Lock()
+				if m.state != stateWaking {
+					if r {
+						m.state = stateActive
+					} else {
+						m.state = stateSuspended
+					}
+					st = m.state
+				}
+				m.mu.Unlock()
+			}
+		}
+	}
 	return map[string]any{
-		"state":            m.state,
-		"active_conns":     m.activeConns,
-		"total_conns":      atomic.LoadInt64(&m.totalConns),
-		"wake_count":       atomic.LoadInt64(&m.wakeCount),
-		"idle_timeout_ms":  m.idleTimeout.Milliseconds(),
-		"wake_duration_ms": m.wakeDuration.Milliseconds(),
-		"backend":          m.backendAddr,
+		"state":              st,
+		"mode":               mode,
+		"compute_container":  m.computeContainer,
+		"container_running":  containerRunning,
+		"active_conns":       conns,
+		"total_conns":        atomic.LoadInt64(&m.totalConns),
+		"wake_count":         atomic.LoadInt64(&m.wakeCount),
+		"last_cold_start_ms": atomic.LoadInt64(&m.lastColdStartMs),
+		"auto_suspend":       m.autoSuspend,
+		"backend":            m.backendAddr,
 	}
 }
 
@@ -73,22 +109,47 @@ func (m *manager) ensureAwake() {
 	m.wakeMu.Lock()
 	defer m.wakeMu.Unlock()
 
+	if m.realSuspend() {
+		running, err := m.docker.running(m.computeContainer)
+		if err == nil && running {
+			m.setState(stateActive)
+			return
+		}
+		m.setState(stateWaking)
+		log.Printf("cold start: starting container %s ...", m.computeContainer)
+		if err := m.docker.start(m.computeContainer); err != nil {
+			log.Printf("container start error: %v", err)
+		}
+		took, err := waitReady(m.backendAddr, 60*time.Second)
+		if err != nil {
+			log.Printf("compute did not become ready: %v", err)
+		}
+		atomic.StoreInt64(&m.lastColdStartMs, took.Milliseconds())
+		m.setState(stateActive)
+		atomic.AddInt64(&m.wakeCount, 1)
+		log.Printf("cold start complete: %s ready in %dms", m.computeContainer, took.Milliseconds())
+		return
+	}
+
+	// simulated mode (no Docker socket): hold for a fixed wake delay
 	m.mu.Lock()
 	if m.state == stateActive {
 		m.mu.Unlock()
 		return
 	}
-	m.state = stateWaking
 	m.mu.Unlock()
-
+	m.setState(stateWaking)
 	log.Printf("cold start: compute suspended, waking (simulated %s)...", m.wakeDuration)
 	time.Sleep(m.wakeDuration)
-
-	m.mu.Lock()
-	m.state = stateActive
-	m.mu.Unlock()
+	m.setState(stateActive)
 	atomic.AddInt64(&m.wakeCount, 1)
 	log.Printf("cold start complete: compute active")
+}
+
+func (m *manager) setState(s string) {
+	m.mu.Lock()
+	m.state = s
+	m.mu.Unlock()
 }
 
 func (m *manager) connOpened() {
@@ -106,26 +167,37 @@ func (m *manager) connClosed() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.activeConns--
-	if m.activeConns <= 0 && m.idleTimeout > 0 {
+	// Only auto-suspend on idle when explicitly enabled. With real suspend the
+	// compute is the shared platform Postgres, so auto-stopping it on proxy-idle
+	// would disrupt the platform — suspend is triggered explicitly instead.
+	if m.autoSuspend && m.activeConns <= 0 && m.idleTimeout > 0 {
 		m.idleTimer = time.AfterFunc(m.idleTimeout, m.suspendIfIdle)
 	}
 }
 
 func (m *manager) suspendIfIdle() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.activeConns == 0 && m.state == stateActive {
-		m.state = stateSuspended
-		log.Printf("idle %s elapsed: compute suspended", m.idleTimeout)
+	idle := m.activeConns == 0
+	m.mu.Unlock()
+	if idle {
+		m.doSuspend("idle timeout")
 	}
 }
 
-// forceSuspend lets the /suspend endpoint simulate scale-to-zero on demand.
+// forceSuspend lets the /suspend endpoint scale the compute to zero on demand.
 func (m *manager) forceSuspend() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.state = stateSuspended
-	log.Printf("forced suspend via API")
+	m.doSuspend("api")
+}
+
+func (m *manager) doSuspend(reason string) {
+	if m.realSuspend() {
+		log.Printf("suspend (%s): stopping container %s ...", reason, m.computeContainer)
+		if err := m.docker.stop(m.computeContainer); err != nil {
+			log.Printf("container stop error: %v", err)
+		}
+	}
+	m.setState(stateSuspended)
+	log.Printf("compute suspended (%s)", reason)
 }
 
 // readStartup reads the client's initial message(s), declining SSL/GSS
@@ -218,7 +290,28 @@ func main() {
 		backendAddr:  env("BACKEND_ADDR", "postgres:5432"),
 		idleTimeout:  envDur("IDLE_TIMEOUT_MS", 30000),
 		wakeDuration: envDur("WAKE_DURATION_MS", 800),
+		autoSuspend:  env("AUTO_SUSPEND", "false") == "true",
 		state:        stateActive,
+	}
+
+	// Real suspend/resume: if a compute container is configured and the Docker
+	// socket is mounted, stop/start the actual container instead of sleeping.
+	if c := env("COMPUTE_CONTAINER", ""); c != "" {
+		socket := env("DOCKER_SOCKET", "/var/run/docker.sock")
+		m.docker = newDockerClient(socket)
+		m.computeContainer = c
+		if running, err := m.docker.running(c); err != nil {
+			log.Printf("WARNING: cannot reach Docker (%v) — falling back to simulated mode", err)
+			m.docker = nil
+			m.computeContainer = ""
+		} else {
+			if running {
+				m.state = stateActive
+			} else {
+				m.state = stateSuspended
+			}
+			log.Printf("real suspend/resume enabled for container %s (running=%v)", c, running)
+		}
 	}
 
 	// Observability / control HTTP API.

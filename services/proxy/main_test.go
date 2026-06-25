@@ -104,7 +104,7 @@ func TestForceSuspend(t *testing.T) {
 }
 
 func TestIdleTimerSuspends(t *testing.T) {
-	m := &manager{state: stateActive, idleTimeout: 10 * time.Millisecond}
+	m := &manager{state: stateActive, idleTimeout: 10 * time.Millisecond, autoSuspend: true}
 	m.connOpened()
 	m.connClosed() // schedules suspend after idleTimeout
 	time.Sleep(40 * time.Millisecond)
@@ -114,7 +114,7 @@ func TestIdleTimerSuspends(t *testing.T) {
 }
 
 func TestConnOpenedCancelsIdleTimer(t *testing.T) {
-	m := &manager{state: stateActive, idleTimeout: 20 * time.Millisecond}
+	m := &manager{state: stateActive, idleTimeout: 20 * time.Millisecond, autoSuspend: true}
 	m.connOpened()
 	m.connClosed()    // schedule suspend
 	m.connOpened()    // a new conn should cancel the pending suspend
@@ -123,4 +123,11 @@ func TestConnOpenedCancelsIdleTimer(t *testing.T) {
 		t.Fatalf("idle timer should have been cancelled, state=%s", m.state)
 	}
 	m.connClosed()
+}
+
+func TestRealSuspendDisabledWithoutDocker(t *testing.T) {
+	m := &manager{state: stateActive}
+	if m.realSuspend() {
+		t.Fatal("realSuspend must be false when no docker client is set")
+	}
 }

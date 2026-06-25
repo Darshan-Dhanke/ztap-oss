@@ -77,8 +77,8 @@ def proxy_wake():
 
     dsn = (
         f"host={settings.proxy_pg_host} port={settings.proxy_pg_port} "
-        f"user={settings.pg_user} password={settings.pg_password} "
-        f"dbname={settings.pg_db} connect_timeout=10"
+        f"user={settings.proxy_pg_user} password={settings.proxy_pg_password} "
+        f"dbname={settings.proxy_pg_db} connect_timeout=30"
     )
     try:
         with psycopg.connect(dsn, autocommit=True) as conn:

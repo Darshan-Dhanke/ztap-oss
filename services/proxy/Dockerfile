@@ -1,7 +1,7 @@
 FROM golang:1.22-alpine AS build
 WORKDIR /src
 COPY services/proxy/go.mod ./
-COPY services/proxy/main.go ./
+COPY services/proxy/*.go ./
 RUN CGO_ENABLED=0 go build -o /ztap-proxy .
 
 FROM alpine:3.20
