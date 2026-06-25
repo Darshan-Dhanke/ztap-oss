@@ -125,6 +125,19 @@ services:
       timeout: 10s
       retries: 30
 
+  # --- schema registry (table schema versioning / governance) ---
+  apicurio:
+    image: ${APICURIO_IMAGE:-apicurio/apicurio-registry-mem:2.5.11.Final}
+    container_name: ztap-apicurio
+    networks: [ztap]
+    ports:
+      - "18085:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/apis/registry/v2/search/artifacts || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
   # --- WAL CDC: Kafka Connect + Debezium Postgres connector ---
   connect:
     image: ${CONNECT_IMAGE:-debezium/connect:2.7.3.Final}
@@ -174,6 +187,7 @@ services:
       PG_DB: ${POSTGRES_DB:-ztap}
       CONNECT_URL: http://connect:8083
       UC_URL: http://unity-catalog:8080
+      APICURIO_URL: http://apicurio:8080
       KAFKA_BOOTSTRAP: kafka:9092
       PROXY_URL: http://proxy:8000
     healthcheck:

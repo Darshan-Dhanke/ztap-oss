@@ -12,6 +12,7 @@ class Settings:
 
     connect_url: str = os.getenv("CONNECT_URL", "http://localhost:8083")
     uc_url: str = os.getenv("UC_URL", "http://localhost:8080")
+    apicurio_url: str = os.getenv("APICURIO_URL", "")  # empty disables schema registration
     kafka_bootstrap: str = os.getenv("KAFKA_BOOTSTRAP", "localhost:9092")
     proxy_url: str = os.getenv("PROXY_URL", "http://localhost:8002")
     # the proxy fronts the dedicated compute Postgres; wake it with a real

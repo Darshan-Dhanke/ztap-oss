@@ -265,12 +265,21 @@ Deliberate, honest gaps:
   on the proxy (cold starts, compute state) and the sink (rows written). Grafana
   has a provisioned "ztap-oss overview" dashboard at http://localhost:13000.
 
+- **Schema registry.** An Apicurio registry ships in the stack; the control
+  plane registers each table's column schema there (versioned) on `register_table`
+  — schema governance/versioning, browsable at http://localhost:18085. Note the
+  CDC stream itself is compact JSON-without-schema; moving the *stream* onto
+  Avro+registry (so the converter enforces compatibility on every event) is the
+  deeper next step.
+- **Hardening (auth/TLS/RBAC).** Open by default for local use; see
+  [docs/HARDENING.md](docs/HARDENING.md) for the precise per-service checklist
+  to close that gap.
+
 ### Still genuinely open
 
-- **No schema registry.** CDC payloads are compact JSON-without-schema, so
-  there's no versioning / breaking-change detection. Adding Apicurio/Confluent +
-  Avro is the next step.
-- **No auth/TLS/RBAC.** Documented as out of scope for a local learning tool.
+- **CDC-stream schema enforcement** (Avro converter + registry on the Debezium
+  stream) and full **production hardening** (TLS/SASL everywhere) — both
+  documented, neither wired on by default.
 
 ---
 

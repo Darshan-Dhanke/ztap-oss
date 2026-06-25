@@ -393,12 +393,48 @@ class Provisioner:
             except httpx.HTTPError as e:
                 raise ProvisionError("unity-catalog-table", str(e)) from e
 
+        schema_version = self._register_schema(catalog, table, uc_columns)
+
         return {
             "registered": f"{catalog}.cdc.{table}",
             "storage_location": storage_location,
             "columns": [{"name": c["name"], "delta_type": c["type_text"]} for c in uc_columns],
             "lossy_columns": lossy_columns,
+            "schema_registry": schema_version,
         }
+
+    def _register_schema(self, catalog: str, table: str, uc_columns: list) -> Optional[dict]:
+        """Register the table's column schema in the schema registry (Apicurio),
+        versioned by artifact id. Best-effort: schema governance must never block
+        provisioning, so any failure is swallowed and reported as None."""
+        if self.s.offline or not self.s.apicurio_url:
+            return None
+        artifact_id = f"{catalog}.cdc.{table}"
+        content = {
+            "type": "ztap.table",
+            "table": artifact_id,
+            "columns": [{"name": c["name"], "type": c["type_text"]} for c in uc_columns],
+        }
+        import json as _json
+        url = f"{self.s.apicurio_url}/apis/registry/v2/groups/ztap/artifacts"
+        try:
+            with httpx.Client(timeout=10) as c:
+                r = c.post(
+                    url,
+                    params={"ifExists": "UPDATE"},
+                    headers={
+                        "X-Registry-ArtifactId": artifact_id,
+                        "X-Registry-ArtifactType": "JSON",
+                        "Content-Type": "application/json",
+                    },
+                    content=_json.dumps(content),
+                )
+                if r.status_code >= 400:
+                    return None
+                body = r.json()
+                return {"artifact_id": artifact_id, "version": body.get("version")}
+        except Exception:  # noqa: BLE001
+            return None
 
     def delete(self, name: str) -> dict:
         """Teardown in reverse order, best-effort."""

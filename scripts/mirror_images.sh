@@ -26,6 +26,7 @@ MAP=(
   "danielqsj/kafka-exporter:v1.7.0=ztap-kafka-exporter"
   "prom/prometheus:v2.54.1=ztap-prometheus"
   "grafana/grafana:11.2.0=ztap-grafana"
+  "apicurio/apicurio-registry-mem:2.5.11.Final=ztap-apicurio"
   # custom-built ztap services (built by docker compose)
   "ztap-oss-control-plane:latest=ztap-control-plane"
   "ztap-oss-sink:latest=ztap-sink"
