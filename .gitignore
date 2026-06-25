@@ -47,3 +47,7 @@ crash.log
 Thumbs.db
 .idea/
 *.swp
+# Neon pageserver runtime artifacts (data lives in a named volume)
+neon/pageserver_config/pageserver.pid
+neon/pageserver_config/tenants/
+neon/pageserver_config/deletion/
