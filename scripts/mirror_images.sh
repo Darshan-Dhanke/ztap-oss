@@ -23,6 +23,9 @@ MAP=(
   "debezium/connect:2.7.3.Final=ztap-debezium-connect"
   "trinodb/trino:450=ztap-trino"
   "busybox:1.36=ztap-busybox"
+  "danielqsj/kafka-exporter:v1.7.0=ztap-kafka-exporter"
+  "prom/prometheus:v2.54.1=ztap-prometheus"
+  "grafana/grafana:11.2.0=ztap-grafana"
   # custom-built ztap services (built by docker compose)
   "ztap-oss-control-plane:latest=ztap-control-plane"
   "ztap-oss-sink:latest=ztap-sink"

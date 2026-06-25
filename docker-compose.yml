@@ -17,6 +17,7 @@ volumes:
   miniodata:
   ucdata:
   trinometa:
+  grafanadata:
 
 services:
   # --- "compute": Postgres with logical replication enabled (CDC source) ---
@@ -180,6 +181,46 @@ services:
       interval: 10s
       timeout: 5s
       retries: 20
+
+  # --- observability: Kafka lag exporter + Prometheus + Grafana ---
+  kafka-exporter:
+    image: ${KAFKA_EXPORTER_IMAGE:-danielqsj/kafka-exporter:v1.7.0}
+    container_name: ztap-kafka-exporter
+    networks: [ztap]
+    command: ["--kafka.server=kafka:9092"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
+  prometheus:
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v2.54.1}
+    container_name: ztap-prometheus
+    networks: [ztap]
+    ports:
+      - "19091:9090"
+    volumes:
+      - ./services/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    restart: unless-stopped
+
+  grafana:
+    image: ${GRAFANA_IMAGE:-grafana/grafana:11.2.0}
+    container_name: ztap-grafana
+    networks: [ztap]
+    ports:
+      - "13000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - grafanadata:/var/lib/grafana
+      - ./services/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./services/observability/grafana/dashboards:/etc/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
 
   # --- analytical SQL over the Delta tables in MinIO (Trino + delta_lake) ---
   # one-shot: make the persistent metastore volume writable by the trino user (uid 1000)

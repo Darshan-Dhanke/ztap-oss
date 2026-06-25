@@ -17,6 +17,7 @@ package main
 import (
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -331,6 +332,33 @@ func main() {
 		m.forceSuspend()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(m.snapshot())
+	})
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		m.mu.Lock()
+		conns := m.activeConns
+		m.mu.Unlock()
+		running := 0
+		if m.realSuspend() {
+			if r, err := m.docker.running(m.computeContainer); err == nil && r {
+				running = 1
+			}
+		}
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		fmt.Fprintf(w, "# HELP ztap_proxy_wake_total Number of cold-start wakes.\n")
+		fmt.Fprintf(w, "# TYPE ztap_proxy_wake_total counter\n")
+		fmt.Fprintf(w, "ztap_proxy_wake_total %d\n", atomic.LoadInt64(&m.wakeCount))
+		fmt.Fprintf(w, "# HELP ztap_proxy_total_connections_total Connections handled.\n")
+		fmt.Fprintf(w, "# TYPE ztap_proxy_total_connections_total counter\n")
+		fmt.Fprintf(w, "ztap_proxy_total_connections_total %d\n", atomic.LoadInt64(&m.totalConns))
+		fmt.Fprintf(w, "# HELP ztap_proxy_active_connections Current proxied connections.\n")
+		fmt.Fprintf(w, "# TYPE ztap_proxy_active_connections gauge\n")
+		fmt.Fprintf(w, "ztap_proxy_active_connections %d\n", conns)
+		fmt.Fprintf(w, "# HELP ztap_proxy_last_cold_start_ms Last measured cold start (ms).\n")
+		fmt.Fprintf(w, "# TYPE ztap_proxy_last_cold_start_ms gauge\n")
+		fmt.Fprintf(w, "ztap_proxy_last_cold_start_ms %d\n", atomic.LoadInt64(&m.lastColdStartMs))
+		fmt.Fprintf(w, "# HELP ztap_proxy_compute_running Whether the compute container is running.\n")
+		fmt.Fprintf(w, "# TYPE ztap_proxy_compute_running gauge\n")
+		fmt.Fprintf(w, "ztap_proxy_compute_running %d\n", running)
 	})
 	go func() {
 		log.Printf("proxy http api on %s", httpAddr)

@@ -1,0 +1,23 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Kafka consumer-group lag — the CDC / sink "falling behind" signal.
+  - job_name: kafka
+    static_configs:
+      - targets: ["kafka-exporter:9308"]
+
+  # ztap connection proxy (cold starts, compute state).
+  - job_name: ztap-proxy
+    static_configs:
+      - targets: ["proxy:8000"]
+
+  # ztap Delta sink (rows written, flushes).
+  - job_name: ztap-sink
+    static_configs:
+      - targets: ["sink:8000"]

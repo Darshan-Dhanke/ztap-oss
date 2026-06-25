@@ -13,6 +13,9 @@ convenience pointer, not legal advice.
 | Apache Kafka | `apache/kafka` | Apache-2.0 | event backbone (KRaft mode) |
 | Debezium | `debezium/connect` | Apache-2.0 | WAL CDC |
 | Trino | `trinodb/trino` | Apache-2.0 | analytical SQL over the Delta tables |
+| Prometheus | `prom/prometheus` | Apache-2.0 | metrics scraping |
+| kafka-exporter | `danielqsj/kafka-exporter` | MIT | Kafka consumer-lag metrics |
+| Grafana | `grafana/grafana` | AGPL-3.0 | metrics dashboards (stock image) |
 
 ztap's own **sink service** is original Apache-2.0 code; the Python libraries it
 depends on are permissive: `deltalake`/delta-rs (Apache-2.0), `pyarrow`
@@ -28,9 +31,10 @@ The **connection proxy** (`services/proxy`) is original Apache-2.0 Go code with
   triggers if you *modify and distribute* MinIO itself. (An earlier draft of
   this project considered S3/object stores generically; the AGPL note applies
   to MinIO specifically.)
-- **Grafana (AGPL) / Airbyte (Elastic License 2.0)** are *not yet wired in* —
-  they belong to Phase 2 (observability) and reverse-sync respectively. When
-  added, the same rule applies: stock images, never offered as-a-service.
+- **Grafana is AGPL-3.0 and now wired in** as a stock image (observability).
+  Pulling the unmodified image into this compose file is "mere aggregation" and
+  fine; the copyleft obligation would only trigger if you *modify and
+  distribute* Grafana itself. Don't offer it as-a-service.
 - The restrictions in AGPL / ELv2 are about **offering the thing as a managed
   service to third parties**. This project is explicitly not that.
 

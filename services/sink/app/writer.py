@@ -12,7 +12,7 @@ import logging
 from typing import Iterable
 
 import pyarrow as pa
-from deltalake import write_deltalake
+from deltalake import write_deltalake, CommitProperties, Transaction
 
 log = logging.getLogger("ztap.sink.writer")
 
@@ -63,16 +63,38 @@ class DeltaWriter:
     def __init__(self, storage_options: dict):
         self.storage_options = storage_options
 
-    def append(self, table_uri: str, rows: list[dict]) -> int:
+    def append(self, table_uri: str, rows: list[dict],
+               app_transactions: list[tuple[str, int]] | None = None) -> int:
+        """Append rows as one atomic Delta commit.
+
+        ``app_transactions`` carries (app_id, version) markers — one per Kafka
+        topic-partition, version = max offset in the batch. Delta records these
+        in the commit and rejects a commit whose version was already applied, so
+        re-processing the same offsets is a no-op (exactly-once at the Delta
+        layer). A rejected duplicate is treated as success.
+        """
         if not rows:
             return 0
         table = rows_to_arrow(rows)
-        write_deltalake(
-            table_uri,
-            table,
-            mode="append",
-            schema_mode="merge",
-            storage_options=self.storage_options,
-        )
+        commit_properties = None
+        if app_transactions:
+            commit_properties = CommitProperties(
+                app_transactions=[Transaction(app_id=a, version=v) for a, v in app_transactions]
+            )
+        try:
+            write_deltalake(
+                table_uri,
+                table,
+                mode="append",
+                schema_mode="merge",
+                storage_options=self.storage_options,
+                commit_properties=commit_properties,
+            )
+        except Exception as e:  # noqa: BLE001
+            msg = str(e).lower()
+            if "transaction" in msg or "already" in msg or "version" in msg:
+                log.info("duplicate batch for %s ignored (idempotent): %s", table_uri, e)
+                return 0
+            raise
         log.info("wrote %d rows to %s", len(rows), table_uri)
         return len(rows)

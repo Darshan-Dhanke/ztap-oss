@@ -14,6 +14,7 @@ help:
 	@echo "  make sync-test - run the sync test (schema evolution + reverse sync)"
 	@echo "  make proxy-test- run the proxy test (real container suspend/resume)"
 	@echo "  make rwatch-test - run the continuous reverse-sync (inbox) test"
+	@echo "  make eo-test   - run the exactly-once sink test"
 	@echo "  make query-delta - register + query the lake/orders Delta table via Trino"
 	@echo "  make test      - unit tests + bring up stack + all integration tests"
 
@@ -62,6 +63,9 @@ proxy-test:
 rwatch-test:
 	bash scripts/reverse_watch_test.sh
 
+eo-test:
+	bash scripts/exactly_once_test.sh
+
 query-delta:
 	bash scripts/query_delta.sh
 
@@ -74,3 +78,4 @@ test: test-unit test-go up
 	bash scripts/sync_test.sh
 	bash scripts/proxy_test.sh
 	bash scripts/reverse_watch_test.sh
+	bash scripts/exactly_once_test.sh

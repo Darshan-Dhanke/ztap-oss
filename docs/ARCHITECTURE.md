@@ -118,5 +118,9 @@ Two responsibilities, both with a pure, unit-tested core and a thin I/O layer:
 | Proxy (state/control API) | 18002 | 8000 |
 | Trino (analytical SQL over Delta) | 18090 | 8080 |
 | Trino auto-register sidecar | (no port; background) | — |
+| Compute Postgres (proxy-managed) | 55433 | 5432 |
+| Reverse-sync watcher | (no port; background) | — |
+| Prometheus | 19091 | 9090 |
+| Grafana | 13000 | 3000 |
 | Kafka Connect / Debezium | 18083 | 8083 |
 | Control plane API | 18000 | 8000 |

@@ -95,6 +95,8 @@ Then open the console: **http://localhost:18000/**
 | Sync service API docs | http://localhost:18001/docs |
 | MinIO console (Delta files) | http://localhost:19001 — `minioadmin` / `minioadmin` |
 | Trino (analytical SQL) | http://localhost:18090 |
+| Grafana (metrics dashboard) | http://localhost:13000 — `admin` / `admin` |
+| Prometheus | http://localhost:19091 |
 | Postgres (direct) | `localhost:55432` — db/user/pass `ztap` |
 | Postgres (through suspend/resume proxy) | `localhost:15432` |
 
@@ -247,7 +249,28 @@ Deliberate, honest gaps:
   file metastores (not Unity Catalog directly), so a standalone HMS (thrift) is
   the step up for a multi-node / shared catalog. `trino-init` handles new-table
   discovery and reconciliation.
-- **Single-node, no HA, no auth/RBAC/TLS.** For learning and local use only.
+- **Single-node, no HA, no auth/RBAC/TLS.** Every service uses default
+  credentials over plain HTTP. For learning and local use only — see the
+  hardening note below.
+
+### What's been hardened past the original limitations
+
+- **Exactly-once sink.** The sink commits each Delta append with a Kafka
+  offset–keyed app transaction, and on startup resumes each partition from the
+  offset Delta already durably committed. Re-processing (even after resetting
+  Kafka offsets to earliest) produces zero duplicates — verified by
+  `make eo-test`.
+- **Observability.** Prometheus + Grafana ship in the stack: a Kafka
+  consumer-lag exporter (the "CDC/sink falling behind" signal), plus `/metrics`
+  on the proxy (cold starts, compute state) and the sink (rows written). Grafana
+  has a provisioned "ztap-oss overview" dashboard at http://localhost:13000.
+
+### Still genuinely open
+
+- **No schema registry.** CDC payloads are compact JSON-without-schema, so
+  there's no versioning / breaking-change detection. Adding Apicurio/Confluent +
+  Avro is the next step.
+- **No auth/TLS/RBAC.** Documented as out of scope for a local learning tool.
 
 ---
 

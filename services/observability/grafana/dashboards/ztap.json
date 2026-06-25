@@ -1,0 +1,54 @@
+{
+  "uid": "ztap-overview",
+  "title": "ztap-oss overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "time": { "from": "now-30m", "to": "now" },
+  "refresh": "10s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Kafka consumer lag (CDC / sink falling behind)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "ztap-prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (consumergroup) (kafka_consumergroup_lag)",
+          "legendFormat": "{{consumergroup}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Sink rows written /s",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "ztap-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (table) (rate(ztap_sink_rows_written_total[1m]))",
+          "legendFormat": "{{table}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Proxy cold-start wakes (total)",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "ztap-prometheus" },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 },
+      "targets": [{ "refId": "A", "expr": "ztap_proxy_wake_total" }]
+    },
+    {
+      "id": 4,
+      "title": "Last cold start (ms)",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "ztap-prometheus" },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 },
+      "targets": [{ "refId": "A", "expr": "ztap_proxy_last_cold_start_ms" }]
+    }
+  ]
+}
