@@ -17,30 +17,51 @@ as-a-service deployment.**
 
 ## What it does
 
-```
-   ┌─────────────────────────── control plane (FastAPI) ───────────────────────────┐
-   │   POST /projects  →  Postgres schema + Unity Catalog catalog + Debezium connector │
-   └───────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+  CP["Control plane (FastAPI) - POST /projects"]
 
-   write ──▶ ┌──────────┐  WAL   ┌──────────┐  topic  ┌─────────┐  consume  ┌────────┐
-   (OLTP)    │ Postgres │ ─────▶ │ Debezium │ ──────▶ │  Kafka  │ ────────▶ │  sink  │
-             └────┬─────┘        └──────────┘         └─────────┘           └───┬────┘
-                  │ proxy fronts :15432 (suspend/resume)                        │ writes Delta
-                  │                                                             ▼
-             ┌────▼──────────┐                                          ┌──────────────┐
-   query ◀── │ proxy /15432  │                                          │ MinIO (S3)   │
-             └───────────────┘            Trino reads ◀──────────────── │ Delta tables │
-                                          (delta_lake)                   └──────┬───────┘
-             ┌───────────────┐                                                 │ metadata
-   sync ◀──▶ │ sync service  │  reverse-sync (lakehouse → Postgres)     ┌──────▼───────┐
-             │ schema reconcile│  + conflict resolution + idempotency    │ Unity Catalog│
-             └───────────────┘                                          └──────────────┘
+  subgraph OLTP["OLTP"]
+    PX["Proxy :15432 - suspend/resume"]
+    PG["Postgres - proj_x.table"]
+  end
+
+  subgraph LAKE["Lakehouse - MinIO / S3"]
+    DL["Delta tables - delta.proj_x.table"]
+    IN["Inbox - Delta CDF, write from Trino"]
+    TR["Trino - analytical SQL"]
+  end
+
+  PX --> PG
+  PG -->|WAL CDC| DBZ["Debezium"]
+  DBZ --> K["Kafka"]
+  K --> SK["Sink"]
+  SK -->|append| DL
+  DL --> TR
+  IN -->|insert / update / delete| RW["Reverse-watcher"]
+  RW -->|apply| PG
+  UC["Unity Catalog"] -. governs .-> DL
+  CP -. provisions .-> PG
+  CP -. provisions .-> UC
+  CP -. provisions .-> DBZ
+
+  classDef oltp fill:#e6f1fb,stroke:#185fa5,color:#042c53;
+  classDef lake fill:#e1f5ee,stroke:#0f6e56,color:#04342c;
+  classDef pipe fill:#f1efe8,stroke:#5f5e5a,color:#2c2c2a;
+  classDef gov fill:#eeedfe,stroke:#534ab7,color:#26215c;
+  classDef ctrl fill:#faeeda,stroke:#854f0b,color:#412402;
+  class PX,PG oltp;
+  class DL,IN,TR lake;
+  class DBZ,K,SK,RW pipe;
+  class UC gov;
+  class CP ctrl;
 ```
 
-A row written to Postgres is captured by Debezium, streamed through Kafka, and
-appended by the sink as a Delta Lake table in MinIO — queryable in Trino under
-**the same `schema.table` name as Postgres**. Schema changes and lakehouse→Postgres
-writes are reconciled by the sync service.
+**Forward:** a row written to Postgres is captured by Debezium, streamed through
+Kafka, and appended by the sink as a Delta table in MinIO — queryable in Trino
+under **the same `schema.table` name as Postgres**. **Reverse:** writing to a
+project's Delta *inbox* propagates insert/update/delete back to Postgres. The
+control plane provisions everything; Unity Catalog governs the Delta side.
 
 ---
 
