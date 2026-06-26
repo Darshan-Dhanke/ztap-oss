@@ -9,7 +9,7 @@ export MSYS2_ARG_CONV_EXCL='*'
 CP=http://localhost:18000
 UC=http://localhost:18080
 PROJ=edge
-PGEXEC="docker exec ztap-postgres psql -U ztap -d ztap -tAc"
+PGEXEC="docker exec -e PGPASSWORD=cloud_admin ztap-neon-compute psql -h localhost -p 55433 -U cloud_admin -d postgres -tAc"
 
 ok=0; bad=0
 check() { # check <desc> <condition-cmd...>

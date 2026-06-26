@@ -23,11 +23,11 @@ CP=http://localhost:18000
 UC=http://localhost:18080
 CONNECT=http://localhost:18083
 PROJECT=smoke
-PGHOST=localhost
-PGPORT=55432
-PGUSER=${POSTGRES_USER:-ztap}
-PGPASS=${POSTGRES_PASSWORD:-ztap}
-PGDB=${POSTGRES_DB:-ztap}
+# OLTP is the Neon compute (cloud_admin/postgres on 55433)
+PGUSER=cloud_admin
+PGPASS=cloud_admin
+PGDB=postgres
+PGEXEC="docker exec -e PGPASSWORD=cloud_admin ztap-neon-compute psql -h localhost -p 55433 -U cloud_admin -d postgres"
 
 pass() { echo "  PASS: $1"; }
 fail() { echo "  FAIL: $1"; exit 1; }
@@ -43,7 +43,7 @@ echo "    -> $RESP"
 echo "$RESP" | grep -q '"status": *"ready"' && pass "project created" || fail "project not ready"
 
 echo "== 3. postgres schema exists =="
-docker exec ztap-postgres psql -U "$PGUSER" -d "$PGDB" -tAc \
+$PGEXEC -tAc \
   "SELECT 1 FROM information_schema.schemata WHERE schema_name='proj_${PROJECT}'" \
   | grep -q 1 && pass "schema proj_${PROJECT} exists" || fail "schema missing"
 
@@ -60,9 +60,9 @@ done
 [ "$STATE" = '"state":"RUNNING"' ] && pass "connector RUNNING" || fail "connector not running ($STATE)"
 
 echo "== 6. CDC event flows on insert =="
-docker exec ztap-postgres psql -U "$PGUSER" -d "$PGDB" -c \
+$PGEXEC -c \
   "CREATE TABLE IF NOT EXISTS proj_${PROJECT}.events (id serial primary key, payload jsonb, ts timestamptz default now());" >/dev/null
-docker exec ztap-postgres psql -U "$PGUSER" -d "$PGDB" -c \
+$PGEXEC -c \
   "INSERT INTO proj_${PROJECT}.events (payload) VALUES ('{\"hello\":\"ztap\"}');" >/dev/null
 TOPIC="ztap.${PROJECT}.proj_${PROJECT}.events"
 echo "    waiting for a message on $TOPIC ..."

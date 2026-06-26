@@ -21,31 +21,11 @@ volumes:
 
 services:
   # --- "compute": Postgres with logical replication enabled (CDC source) ---
-  postgres:
-    image: ${POSTGRES_IMAGE:-postgres:16}
-    container_name: ztap-postgres
-    networks: [ztap]
-    ports:
-      - "55432:5432"
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-ztap}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ztap}
-      POSTGRES_DB: ${POSTGRES_DB:-ztap}
-    command:
-      - "postgres"
-      - "-c"
-      - "wal_level=logical"
-      - "-c"
-      - "max_wal_senders=10"
-      - "-c"
-      - "max_replication_slots=10"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ztap} -d ${POSTGRES_DB:-ztap}"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
+  # NOTE: the OLTP Postgres is now Neon (see docker-compose.neon.yml) — pages
+  # live on MinIO. The standalone postgres + dedicated compute services were
+  # retired in the Neon cutover. Bring the stack up with both files:
+  #   docker compose -f docker-compose.yml -f docker-compose.neon.yml up -d
+  # (the Makefile does this for you).
 
   # --- lakehouse object store ---
   minio:
@@ -173,18 +153,21 @@ services:
     ports:
       - "18000:8000"
     depends_on:
-      postgres:
+      neon-compute:
         condition: service_healthy
       connect:
         condition: service_healthy
       unity-catalog:
         condition: service_started
     environment:
-      PG_HOST: postgres
-      PG_PORT: "5432"
-      PG_USER: ${POSTGRES_USER:-ztap}
-      PG_PASSWORD: ${POSTGRES_PASSWORD:-ztap}
-      PG_DB: ${POSTGRES_DB:-ztap}
+      PG_HOST: compute            # the Neon compute (alias)
+      PG_PORT: "55433"
+      PG_USER: cloud_admin
+      PG_PASSWORD: cloud_admin
+      PG_DB: postgres
+      PROXY_PG_USER: cloud_admin
+      PROXY_PG_PASSWORD: cloud_admin
+      PROXY_PG_DB: postgres
       CONNECT_URL: http://connect:8083
       UC_URL: http://unity-catalog:8080
       APICURIO_URL: http://apicurio:8080
@@ -290,27 +273,6 @@ services:
       REGISTER_INTERVAL: "30"
     restart: unless-stopped
 
-  # --- a dedicated "compute" Postgres the proxy can really suspend/resume ---
-  # Separate from the platform Postgres so stopping it demonstrates real
-  # scale-to-zero without disrupting the rest of the stack.
-  compute:
-    image: ${POSTGRES_IMAGE:-postgres:16}
-    container_name: ztap-compute
-    networks: [ztap]
-    ports:
-      - "55433:5432"
-    environment:
-      POSTGRES_USER: compute
-      POSTGRES_PASSWORD: compute
-      POSTGRES_DB: compute
-    volumes:
-      - ./services/compute/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U compute -d compute"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-
   # --- continuous lakehouse -> Postgres reverse sync (component #2) ---
   # Watches each project's *_inbox Delta table and auto-applies new rows to
   # Postgres via the sync service. Write to the inbox from Trino/DBeaver.
@@ -331,10 +293,11 @@ services:
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       WAREHOUSE_BUCKET: ${WAREHOUSE_BUCKET:-warehouse}
       SYNC_URL: http://sync:8000
-      PG_HOST: postgres
-      PG_USER: ${POSTGRES_USER:-ztap}
-      PG_PASSWORD: ${POSTGRES_PASSWORD:-ztap}
-      PG_DB: ${POSTGRES_DB:-ztap}
+      PG_HOST: compute
+      PG_PORT: "55433"
+      PG_USER: cloud_admin
+      PG_PASSWORD: cloud_admin
+      PG_DB: postgres
       WATCH_INTERVAL: "10"
     restart: unless-stopped
 
@@ -349,12 +312,12 @@ services:
       - "15432:5432"   # Postgres wire protocol, through the proxy
       - "18002:8000"   # proxy state/control HTTP API
     depends_on:
-      compute:
+      neon-compute:
         condition: service_healthy
     environment:
-      BACKEND_ADDR: compute:5432
-      COMPUTE_CONTAINER: ztap-compute   # the proxy really stops/starts this
-      AUTO_SUSPEND: "false"             # suspend is triggered explicitly
+      BACKEND_ADDR: compute:55433        # the Neon compute (alias "compute")
+      COMPUTE_CONTAINER: ztap-neon-compute  # proxy really stops/starts the Neon compute = real scale-to-zero
+      AUTO_SUSPEND: "false"              # suspend is triggered explicitly
       WAKE_DURATION_MS: "800"           # only used if Docker is unreachable
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock   # to start/stop the compute
@@ -395,16 +358,16 @@ services:
     ports:
       - "18001:8000"
     depends_on:
-      postgres:
+      neon-compute:
         condition: service_healthy
       unity-catalog:
         condition: service_started
     environment:
-      PG_HOST: postgres
-      PG_PORT: "5432"
-      PG_USER: ${POSTGRES_USER:-ztap}
-      PG_PASSWORD: ${POSTGRES_PASSWORD:-ztap}
-      PG_DB: ${POSTGRES_DB:-ztap}
+      PG_HOST: compute            # the Neon compute (alias)
+      PG_PORT: "55433"
+      PG_USER: cloud_admin
+      PG_PASSWORD: cloud_admin
+      PG_DB: postgres
       UC_URL: http://unity-catalog:8080
       WAREHOUSE_BUCKET: ${WAREHOUSE_BUCKET:-warehouse}
     healthcheck:

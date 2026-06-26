@@ -9,7 +9,7 @@ export MSYS2_ARG_CONV_EXCL='*'
 
 CP=http://localhost:18000
 P=sinktest
-PSQL="docker exec ztap-postgres psql -U ztap -d ztap"
+PSQL="docker exec -e PGPASSWORD=cloud_admin ztap-neon-compute psql -h localhost -p 55433 -U cloud_admin -d postgres"
 
 pass(){ echo "  PASS: $1"; }
 fail(){ echo "  FAIL: $1"; exit 1; }

@@ -10,7 +10,7 @@ CP=http://localhost:18000
 SYNC=http://localhost:18001
 UC=http://localhost:18080
 P=synctest
-PSQL="docker exec ztap-postgres psql -U ztap -d ztap"
+PSQL="docker exec -e PGPASSWORD=cloud_admin ztap-neon-compute psql -h localhost -p 55433 -U cloud_admin -d postgres"
 
 ok=0; bad=0
 pass(){ echo "  PASS: $1"; ok=$((ok+1)); }

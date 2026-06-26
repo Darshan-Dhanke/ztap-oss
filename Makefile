@@ -1,5 +1,9 @@
 .PHONY: help up down logs ps smoke edge sink-test sync-test proxy-test test test-unit test-go clean rebuild
 
+# The OLTP Postgres is Neon (docker-compose.neon.yml), so every compose command
+# merges both files.
+COMPOSE := docker compose -f docker-compose.yml -f docker-compose.neon.yml
+
 help:
 	@echo "ztap-oss targets:"
 	@echo "  make up        - build + start the full data plane"
@@ -19,22 +23,22 @@ help:
 	@echo "  make test      - unit tests + bring up stack + all integration tests"
 
 up:
-	docker compose up -d --build
+	$(COMPOSE) up -d --build
 
 down:
-	docker compose down
+	$(COMPOSE) down
 
 clean:
-	docker compose down -v
+	$(COMPOSE) down -v
 
 ps:
-	docker compose ps
+	$(COMPOSE) ps
 
 logs:
-	docker compose logs -f
+	$(COMPOSE) logs -f
 
 rebuild:
-	docker compose up -d --build control-plane
+	$(COMPOSE) up -d --build control-plane
 
 test-unit:
 	cd packages/type-engine && python -m pytest -q

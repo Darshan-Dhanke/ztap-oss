@@ -145,4 +145,10 @@ services:
       - safekeeper2
       - safekeeper3
       - pageserver
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -p 55433 -U cloud_admin || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
     restart: unless-stopped

@@ -9,7 +9,7 @@ export MSYS2_ARG_CONV_EXCL='*'
 
 CP=http://localhost:18000
 P=eo
-PSQL="docker exec ztap-postgres psql -U ztap -d ztap -c"
+PSQL="docker exec -e PGPASSWORD=cloud_admin ztap-neon-compute psql -h localhost -p 55433 -U cloud_admin -d postgres -c"
 # count rows in the Delta table via delta-rs inside the sink container
 delta_count() {
   docker exec ztap-sink python -c "
