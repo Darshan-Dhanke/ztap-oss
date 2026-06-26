@@ -64,7 +64,8 @@ writes are reconciled by the sync service.
 | 4 | Type engine | `packages/type-engine` | Postgres↔Delta type mapping + conflict resolution; pure Python, honest about every lossy conversion (`jsonb`, `uuid`, `interval`, arrays, oversized `numeric`, …) |
 | — | Delta sink | `services/sink` | consumes the CDC stream and writes real Delta Lake tables to MinIO via delta-rs (no Spark); captures insert/update/delete |
 | 2 | Sync service | `services/sync` | reconciles Postgres↔Unity-Catalog schema drift, and applies lakehouse→Postgres changes through the type-engine's conflict policy with an idempotency ledger (loop-prevention) |
-| 1 | Connection proxy | `services/proxy` | Go Postgres proxy that holds a connection open during a (simulated) compute cold-start, wakes it, and transparently proxies the session |
+| 1 | Connection proxy | `services/proxy` | Go Postgres proxy that holds a connection open during a real compute cold-start (stops/starts the container via Docker), and transparently proxies the session |
+| 2 | Reverse watcher | `services/reverse-watcher` | continuously applies lakehouse **inbox** changes (Delta CDF) back to Postgres — insert/update/delete, exactly-once |
 | — | Trino auto-register | `services/trino-init` | scans MinIO and keeps Trino's view of the Delta tables in sync both ways (registers new tables, unregisters deleted ones) |
 
 The four numbered components are the gaps the OSS tools don't ship — the same
@@ -164,14 +165,39 @@ WHERE rn = 1 AND NOT _deleted ORDER BY id;
 
 ### 4. Push a change from the lakehouse side, back to Postgres
 
+Lakehouse → Postgres goes through an **inbox** — a Change-Data-Feed–enabled Delta
+table you write to. Create one whose columns are the ones you want to write (it
+must include the primary key):
+
 ```bash
-curl -X POST localhost:18001/projects/sales/tables/orders/reverse-sync \
-  -H 'content-type: application/json' \
-  -d '{"rows":[{"id":3,"customer":"carol","amount":42.00}],"pk_col":"id","policy":"last_write_wins"}'
+scripts/make_inbox.sh sales orders "id bigint, customer varchar, amount decimal(10,2)"
 ```
 
-`carol` now exists in `proj_sales.orders` in Postgres — and, because that write
-hits Postgres, it flows forward through CDC back into the lakehouse too.
+Then run normal SQL on it from Trino/DBeaver. The `reverse-watcher` reads the
+inbox's CDF and applies each change to `proj_sales.orders` within ~10s — **no
+version numbers, deletes included**:
+
+```sql
+-- in Trino (catalog delta)
+INSERT INTO delta.proj_sales.orders_inbox VALUES (3, 'carol', 42.00);
+UPDATE delta.proj_sales.orders_inbox SET amount = 99.00 WHERE id = 3;
+DELETE FROM delta.proj_sales.orders_inbox WHERE id = 3;
+```
+
+Each write lands in Postgres (and flows *forward* through CDC back into the Delta
+feed too). Two things to know:
+
+- **Leave ~10s between operations if you want to see each one.** Running
+  insert→update→delete on the same id back-to-back collapses to a single net
+  delete — the watcher applies the latest change per key.
+- **The inbox only needs the columns you write** (plus the PK). Columns you omit
+  keep their Postgres value on update, or are `NULL` on insert. Map `jsonb` →
+  `varchar` (JSON text) and arrays → `array(...)`; those round-trip back to
+  Postgres. (Structurally-different types like `interval` don't auto-convert in
+  reverse — see Limitations.)
+
+A one-shot `POST /projects/{p}/tables/{t}/reverse-sync` API also exists for
+triggered, conflict-policy-driven syncs.
 
 ### 5. Inspect the Delta transaction log
 
@@ -182,9 +208,13 @@ docker exec ztap-trino trino --catalog delta --schema proj_sales \
 
 ### 6. See the proxy cold-start
 
-The proxy idles to `suspended` after ~30s (scale-to-zero simulation). Wake it
-with a connection through `:15432` (the dashboard's **Wake compute** button does
-this), and watch `wake_count` increment at http://localhost:18002/state.
+The proxy fronts a dedicated compute Postgres and **really stops/starts that
+container** (Docker API). Suspend it from the dashboard's **Force suspend** button
+(or `POST :18002/suspend`) — the container actually exits. The next connection
+through `:15432` (or the **Wake compute** button) starts it again with a real,
+measured cold start; watch `wake_count` and `last_cold_start_ms` at
+http://localhost:18002/state. Suspend is explicit (`AUTO_SUSPEND=false`) since the
+compute is shared.
 
 ### Naming
 
@@ -212,7 +242,9 @@ Individual integration suites (run against a running stack):
 | `make edge`       | nasty type mappings into UC, idempotency, bad input, clean teardown |
 | `make sink-test`  | insert/update/delete → readable back from the Delta table in MinIO |
 | `make sync-test`  | schema evolution reconcile + reverse-sync with conflict resolution |
-| `make proxy-test` | cold-start wake through the proxy returns correctly |
+| `make proxy-test` | real container suspend/resume through the proxy returns correctly |
+| `make rwatch-test`| lakehouse inbox insert/update/delete propagates to Postgres (CDF) |
+| `make eo-test`    | exactly-once sink: reset offsets + reprocess, zero duplicates |
 | `make query-delta`| register + query a Delta table via Trino |
 
 All integration tests self-clean (they remove their own Delta data), and
@@ -282,6 +314,13 @@ Deliberate, honest gaps:
 - **CDC-stream schema enforcement** (Avro converter + registry on the Debezium
   stream) and full **production hardening** (TLS/SASL everywhere) — both
   documented, neither wired on by default.
+- **Reverse round-trip of structurally-different types.** Forward, the
+  type-engine maps everything to Delta (with lossy flags). Reverse handles the
+  common types directly (`jsonb`, arrays, `uuid`, `timestamptz`, `numeric`,
+  `boolean`), but a type whose Delta representation isn't a plain coercion — e.g.
+  `interval` (stored as a `LONG` of microseconds) — errors on the way back unless
+  the inbox carries a Postgres-readable form. The reverse-apply could grow
+  explicit per-type casts; today it's an honest edge.
 
 ---
 
@@ -293,11 +332,12 @@ services/control-plane/     #3 control plane (FastAPI) + dashboard + tests
 services/type-engine via packages/type-engine/   #4 type mapping + conflict engine + tests
 services/sink/              Delta sink (Kafka CDC → Delta on MinIO) + tests
 services/sync/              #2 schema reconcile + reverse sync + tests
+services/reverse-watcher/   continuous lakehouse→Postgres via inbox CDF
 services/proxy/             #1 suspend/resume Postgres proxy (Go) + tests
 services/trino/             Trino delta_lake catalog config
 services/trino-init/        auto-register/reconcile Delta tables in Trino
-scripts/                    integration tests + helpers (query_delta, mirror_images)
-docs/                       ARCHITECTURE.md, LICENSES.md
+scripts/                    integration tests + helpers (make_inbox, query_delta, mirror_images)
+docs/                       ARCHITECTURE.md, LICENSES.md, HARDENING.md
 ```
 
 ## License
