@@ -278,6 +278,18 @@ All integration tests self-clean (they remove their own Delta data), and
 This is a faithful reconstruction of the *architecture*, not a production system.
 Deliberate, honest gaps:
 
+- **Consistency & conflict model — read this first.** ztap-oss is **eventually
+  consistent**; there is no cross-system transaction. Sync is **directional with
+  a single owner per table**: Postgres is the source of truth, the lakehouse is a
+  synced copy, and lakehouse→Postgres writes go through a separate *inbox*. **Do
+  not treat both sides as authoritative for the same row.** Concurrent same-row
+  writes from both sides are the classic *master-master* problem — this project
+  **avoids** it by design rather than solving it (the continuous path resolves
+  "inbox wins," which can silently overwrite a concurrent Postgres write).
+  Databricks Lakebase draws the same line (directional, single-owner per table;
+  reverse-synced tables are read-only on the Postgres side) — it just *enforces*
+  it; here it's by convention.
+
 - **The proxy does real container-level suspend/resume, but not Neon-style
   storage/compute separation.** It fronts a dedicated `ztap-compute` Postgres and
   genuinely stops/starts that container via the Docker API — so cold-start
