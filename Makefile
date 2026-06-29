@@ -73,6 +73,13 @@ eo-test:
 query-delta:
 	bash scripts/query_delta.sh
 
+# --- Neon branching (opt-in Neon stack) ---
+branch:
+	bash scripts/neon_branch.sh $(NAME) $(if $(PORT),$(PORT),55435)
+
+branch-test:
+	bash scripts/neon_branch_test.sh
+
 test: test-unit test-go up
 	@echo "waiting for services to settle..."
 	@sleep 20

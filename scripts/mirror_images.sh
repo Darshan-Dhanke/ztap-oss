@@ -34,6 +34,10 @@ MAP=(
   "ztap-oss-proxy:latest=ztap-proxy"
   "ztap-oss-trino-init:latest=ztap-trino-init"
   "ztap-oss-reverse-watcher:latest=ztap-reverse-watcher"
+  # Neon storage/compute (opt-in mode) — large images
+  "ghcr.io/neondatabase/neon:latest=ztap-neon"
+  "ghcr.io/neondatabase/compute-node-v16:latest=ztap-neon-compute-node"
+  "ztap-neon-compute:latest=ztap-neon-compute"
 )
 
 echo "Mirroring ${#MAP[@]} images to namespace '$NS'..."
